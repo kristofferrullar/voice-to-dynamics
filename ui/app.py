@@ -20,10 +20,13 @@ Endpoints — Config:
   GET  /config/mcp      → list MCP servers
   POST /config/mcp      → enable / disable a named MCP server
   GET  /config/channels → read channel credentials status (no secrets)
+  GET  /config/credentials  → credential status (no secret values)
+  POST /config/credentials  → update .env values and reload
 
 Endpoints — Channel webhooks:
   POST /webhook/teams          → Microsoft Teams Bot Framework
   POST /webhook/whatsapp       → Twilio WhatsApp
+  POST /webhook/telegram       → Telegram Bot (webhook mode)
   POST /webhook/acs/call       → ACS incoming call (answer)
   POST /webhook/acs/events     → ACS mid-call events (recognize / play)
 """
@@ -127,6 +130,16 @@ app.mount(
     StaticFiles(directory=str(Path(__file__).parent / "static")),
     name="static",
 )
+
+
+@app.on_event("startup")
+async def _startup() -> None:
+    """Auto-start Telegram long-polling when a token is configured."""
+    s = _get_settings()
+    if s.telegram_bot_token:
+        from src.channels.telegram import get_poller  # noqa: PLC0415
+        get_poller(s.telegram_bot_token).start()
+        logger.info("Telegram poller started (token configured)")
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
 
@@ -361,7 +374,88 @@ async def get_channel_config() -> dict[str, Any]:
             "phone_number": s.acs_phone_number or "",
             "callback_url": s.acs_callback_url or "",
         },
+        "telegram": {
+            "configured": bool(s.telegram_bot_token),
+            "mode":       "polling" if s.telegram_bot_token else "disabled",
+        },
     }
+
+
+# ── Config — credential management ─────────────────────────────────────────────
+
+_ALLOWED_CREDENTIAL_KEYS = {
+    "ANTHROPIC_API_KEY", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION",
+    "GITHUB_PERSONAL_ACCESS_TOKEN", "AZURE_TENANT_ID", "AZURE_CLIENT_ID",
+    "AZURE_CLIENT_SECRET", "DATAVERSE_ENVIRONMENT_URL", "TELEGRAM_BOT_TOKEN",
+    "TEAMS_APP_ID", "TEAMS_APP_PASSWORD", "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_NUMBER",
+}
+
+
+@app.get("/config/credentials")
+async def get_credentials() -> dict[str, Any]:
+    """Return credential status — which are set (True/False) and safe partial previews. No full secret values."""
+    s = _get_settings()
+
+    def mask(v: str) -> str:
+        return v[:4] + "…" if len(v) > 8 else ("set" if v else "")
+
+    return {
+        "credentials": [
+            {"key": "ANTHROPIC_API_KEY",            "label": "Anthropic API Key",              "set": bool(s.anthropic_api_key),             "preview": mask(s.anthropic_api_key),           "description": "Claude LLM — required for agent", "group": "Core"},
+            {"key": "AZURE_SPEECH_KEY",              "label": "Azure Speech Key",                "set": bool(s.azure_speech_key),              "preview": mask(s.azure_speech_key),            "description": "STT + TTS for voice messages", "group": "Core"},
+            {"key": "AZURE_SPEECH_REGION",           "label": "Azure Speech Region",             "set": bool(s.azure_speech_region),           "preview": s.azure_speech_region,               "description": "e.g. swedencentral", "group": "Core"},
+            {"key": "GITHUB_PERSONAL_ACCESS_TOKEN",  "label": "GitHub Token",                    "set": bool(s.github_personal_access_token),  "preview": mask(s.github_personal_access_token),"description": "GitHub MCP server — repo, issues, PRs", "group": "MCP Servers"},
+            {"key": "AZURE_TENANT_ID",               "label": "Azure Tenant ID",                 "set": bool(s.azure_tenant_id),               "preview": mask(s.azure_tenant_id),             "description": "Dataverse / Dynamics 365", "group": "MCP Servers"},
+            {"key": "AZURE_CLIENT_ID",               "label": "Azure Client ID",                 "set": bool(s.azure_client_id),               "preview": mask(s.azure_client_id),             "description": "Dataverse / Dynamics 365", "group": "MCP Servers"},
+            {"key": "AZURE_CLIENT_SECRET",           "label": "Azure Client Secret",             "set": bool(s.azure_client_secret),           "preview": mask(s.azure_client_secret),         "description": "Dataverse / Dynamics 365", "group": "MCP Servers"},
+            {"key": "DATAVERSE_ENVIRONMENT_URL",     "label": "Dataverse Environment URL",       "set": bool(s.dataverse_environment_url),     "preview": s.dataverse_environment_url[:30] + "…" if len(s.dataverse_environment_url) > 30 else s.dataverse_environment_url, "description": "e.g. https://org.crm.dynamics.com", "group": "MCP Servers"},
+            {"key": "TELEGRAM_BOT_TOKEN",            "label": "Telegram Bot Token",              "set": bool(s.telegram_bot_token),            "preview": mask(s.telegram_bot_token),          "description": "From @BotFather — enables Telegram channel", "group": "Channels"},
+            {"key": "TEAMS_APP_ID",                  "label": "Teams App ID",                    "set": bool(s.teams_app_id),                  "preview": mask(s.teams_app_id),                "description": "Azure Bot registration App ID", "group": "Channels"},
+            {"key": "TEAMS_APP_PASSWORD",            "label": "Teams App Password",              "set": bool(s.teams_app_password),            "preview": mask(s.teams_app_password),          "description": "Azure Bot registration secret", "group": "Channels"},
+            {"key": "TWILIO_ACCOUNT_SID",            "label": "Twilio Account SID",              "set": bool(s.twilio_account_sid),            "preview": mask(s.twilio_account_sid),          "description": "WhatsApp via Twilio", "group": "Channels"},
+            {"key": "TWILIO_AUTH_TOKEN",             "label": "Twilio Auth Token",               "set": bool(s.twilio_auth_token),             "preview": mask(s.twilio_auth_token),           "description": "WhatsApp via Twilio", "group": "Channels"},
+            {"key": "TWILIO_WHATSAPP_NUMBER",        "label": "Twilio WhatsApp Number",          "set": bool(s.twilio_whatsapp_number),        "preview": s.twilio_whatsapp_number,            "description": "e.g. whatsapp:+14155238886", "group": "Channels"},
+        ]
+    }
+
+
+class CredentialUpdateRequest(BaseModel):
+    updates: dict[str, str]
+
+
+@app.post("/config/credentials")
+async def update_credentials(req: CredentialUpdateRequest) -> dict[str, Any]:
+    """Write new credential values to .env and reload settings cache."""
+    unknown = set(req.updates) - _ALLOWED_CREDENTIAL_KEYS
+    if unknown:
+        raise HTTPException(400, f"Unknown credential keys: {unknown}")
+
+    env_path = ROOT / ".env"
+    env_text = env_path.read_text() if env_path.exists() else ""
+
+    for key, value in req.updates.items():
+        import re  # noqa: PLC0415
+        pattern = re.compile(rf"^({re.escape(key)}=).*$", re.MULTILINE)
+        if pattern.search(env_text):
+            env_text = pattern.sub(rf"\g<1>{value}", env_text)
+        else:
+            env_text = env_text.rstrip() + f"\n{key}={value}\n"
+
+    env_path.write_text(env_text)
+
+    # Reload settings cache
+    try:
+        from config.settings import get_settings  # noqa: PLC0415
+        get_settings.cache_clear()
+        from src.channels.handler import channel_handler  # noqa: PLC0415
+        channel_handler.invalidate()
+    except Exception:
+        pass
+
+    updated_keys = list(req.updates.keys())
+    _push_log(f"🔑 Credentials updated: {', '.join(updated_keys)}")
+    return {"ok": True, "updated": updated_keys}
 
 
 # ── Webhook — Microsoft Teams ────────────────────────────────────────────────────
@@ -438,6 +532,29 @@ async def whatsapp_webhook(request: Request) -> PlainTextResponse:
     _push_log(f"🤖 WhatsApp reply: {reply_text}")
 
     return PlainTextResponse(wa_adapter.twiml_message(reply_text), media_type="text/xml")
+
+
+# ── Webhook — Telegram ───────────────────────────────────────────────────────────
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request) -> dict[str, Any]:
+    """Receive updates from Telegram (webhook mode — requires a public URL).
+
+    In local development use polling mode instead: just set TELEGRAM_BOT_TOKEN
+    and the poller starts automatically on server startup — no tunnel needed.
+    """
+    from src.channels import telegram as tg_adapter  # noqa: PLC0415
+
+    s = _get_settings()
+    if not s.telegram_bot_token:
+        raise HTTPException(503, "Telegram not configured — set TELEGRAM_BOT_TOKEN")
+
+    body: dict[str, Any] = await request.json()
+    parsed = tg_adapter.parse_update(body)
+    if parsed:
+        _push_log(f"📩 Telegram [{parsed['user']}]: {parsed['text']}")
+    await tg_adapter.handle_webhook(s.telegram_bot_token, body)
+    return {"ok": True}
 
 
 # ── Webhook — ACS incoming call ──────────────────────────────────────────────────

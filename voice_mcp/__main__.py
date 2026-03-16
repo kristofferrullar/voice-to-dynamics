@@ -65,6 +65,7 @@ async def _check() -> None:
     cred("DATAVERSE_ENVIRONMENT_URL",     s.dataverse_environment_url)
     cred("TEAMS_APP_ID",                  s.teams_app_id)
     cred("TWILIO_ACCOUNT_SID",            s.twilio_account_sid)
+    cred("TELEGRAM_BOT_TOKEN",            s.telegram_bot_token,  "from @BotFather")
     cred("ACS_CONNECTION_STRING",         s.acs_connection_string)
 
     # ── MCP servers ────────────────────────────────────────────────────────────
@@ -102,6 +103,8 @@ async def _check() -> None:
             "webhook: /webhook/teams")
     channel("WhatsApp (Twilio)", bool(s.twilio_account_sid and s.twilio_auth_token),
             "webhook: /webhook/whatsapp")
+    channel("Telegram",          bool(s.telegram_bot_token),
+            "polling (no tunnel needed)" if s.telegram_bot_token else "set TELEGRAM_BOT_TOKEN")
     channel("ACS Voice",         bool(s.acs_connection_string),
             "webhook: /webhook/acs/call")
 
@@ -111,6 +114,7 @@ async def _check() -> None:
     n_channels = sum([
         bool(s.teams_app_id and s.teams_app_password),
         bool(s.twilio_account_sid and s.twilio_auth_token),
+        bool(s.telegram_bot_token),
         bool(s.acs_connection_string),
     ])
     agent_ready = bool(s.anthropic_api_key)

@@ -56,11 +56,11 @@ class ChannelHandler:
             if not self._ready:          # double-checked locking
                 await self._connect()
 
-    async def process(self, text: str) -> str:
+    async def process(self, text: str, session_id: str = "default") -> str:
         """Process a text utterance and return a short spoken response."""
         await self._ensure_ready()
         try:
-            response = await self._agent.process(text)   # type: ignore[union-attr]
+            response = await self._agent.process(text, session_id=session_id)   # type: ignore[union-attr]
             return response.result_summary or "Done."
         except Exception as exc:
             logger.error("ChannelHandler error: %s", exc)

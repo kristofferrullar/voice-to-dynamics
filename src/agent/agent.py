@@ -34,22 +34,49 @@ class MCPAgent:
         self._mcp = mcp
         self._max_iterations = max_iterations
         self._memory = memory or ConversationMemory(enabled=False)
+        self._session_memories: dict[str, ConversationMemory] = {}
         # Built lazily on the first process() call using the live server list,
         # so the prompt accurately reflects whichever MCPs actually connected.
         self._system_prompt: str | None = None
+
+    def _get_memory(self, session_id: str) -> ConversationMemory:
+        """Return (or create) the ConversationMemory for the given session_id."""
+        if session_id not in self._session_memories:
+            from pathlib import Path  # noqa: PLC0415
+            import yaml  # noqa: PLC0415
+            try:
+                cfg = yaml.safe_load((Path(__file__).resolve().parents[2] / "config" / "pipeline.yaml").read_text())
+                mem_cfg = cfg.get("agent", {}).get("memory", {})
+                self._session_memories[session_id] = ConversationMemory(
+                    enabled=mem_cfg.get("enabled", True),
+                    max_turns=mem_cfg.get("max_turns", 10),
+                )
+            except Exception:
+                self._session_memories[session_id] = ConversationMemory()
+        return self._session_memories[session_id]
 
     def reset_memory(self) -> None:
         """Clear all conversation history."""
         self._memory.reset()
 
-    async def process(self, utterance: str) -> AgentResponse:
+    def reset_session(self, session_id: str) -> None:
+        """Clear conversation history for a single session."""
+        if session_id in self._session_memories:
+            self._session_memories[session_id].reset()
+
+    def reset_all_sessions(self) -> None:
+        """Clear conversation history for all sessions."""
+        self._session_memories.clear()
+
+    async def process(self, utterance: str, session_id: str = "default") -> AgentResponse:
         # Build the prompt once per agent lifetime from the live server summaries.
         if self._system_prompt is None:
             self._system_prompt = build_system_prompt(self._mcp.get_server_summaries())
         system = self._system_prompt
         tools = _convert_tools(await self._mcp.get_tools())
 
-        history = self._memory.get_history()
+        memory = self._get_memory(session_id)
+        history = memory.get_history()
         messages: list[dict[str, Any]] = history + [{"role": "user", "content": utterance}]
         turn_start = len(history)
         actions: list[ActionRecord] = []
@@ -63,7 +90,7 @@ class MCPAgent:
 
             if stop_reason != _STOP_REASON_TOOL_USE:
                 text = _extract_text(content)
-                self._memory.add_turn(messages[turn_start:])
+                memory.add_turn(messages[turn_start:])
                 return AgentResponse(
                     result_summary=text,
                     intention=utterance,
@@ -98,7 +125,7 @@ class MCPAgent:
 
             messages.append({"role": "user", "content": tool_results})
 
-        self._memory.add_turn(messages[turn_start:])
+        memory.add_turn(messages[turn_start:])
         return AgentResponse(
             result_summary="Sorry, I wasn't able to complete your request.",
             intention=utterance,

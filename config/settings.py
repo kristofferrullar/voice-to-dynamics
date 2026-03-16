@@ -1,13 +1,19 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve .env relative to the project root (parent of this config/ directory),
+# not relative to CWD — avoids silent load failures when called from sub-packages.
+_ENV_FILE = str(Path(__file__).resolve().parents[1] / ".env")
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
+        env_ignore_empty=True,   # blank shell vars don't override .env values
     )
 
     # ── Azure Speech ────────────────────────────────────────────────────────────
@@ -44,6 +50,9 @@ class Settings(BaseSettings):
     acs_connection_string: str = ""
     acs_phone_number: str = ""        # the ACS-acquired phone number
     acs_callback_url: str = ""        # public HTTPS URL for ACS event callbacks
+
+    # ── Telegram Bot ─────────────────────────────────────────────────────────────
+    telegram_bot_token: str = ""      # from @BotFather — enables polling automatically
 
 
 @lru_cache
