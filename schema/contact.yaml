@@ -1,0 +1,81 @@
+entity:
+  logical_name: contact
+  entity_set: contacts
+  display_name_sv: Kontakt
+
+intent_triggers:
+  - kontakt
+  - kontakter
+  - person
+  - personer
+  - contact
+  - contacts
+
+attributes:
+  - logical_name: contactid
+    display_name_sv: ID
+    type: guid
+    filterable: false
+    selectable: true
+
+  - logical_name: fullname
+    display_name_sv: namn, fullständigt namn
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: firstname
+    display_name_sv: förnamn
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: lastname
+    display_name_sv: efternamn
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: emailaddress1
+    display_name_sv: e-post, email
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: telephone1
+    display_name_sv: telefon, mobilnummer
+    type: string
+    filterable: false
+    selectable: true
+
+  - logical_name: statecode
+    display_name_sv: status, aktiv, inaktiv
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      active: 0
+      inactive: 1
+
+  - logical_name: _parentcustomerid_value
+    display_name_sv: företag, konto, arbetsgivare
+    type: lookup
+    filterable: true
+    selectable: true
+
+  - logical_name: _ownerid_value
+    display_name_sv: ägare, ansvarig
+    type: lookup
+    filterable: true
+    selectable: true
+
+query_templates:
+  list_my_contacts:
+    description: "Show my contacts / Visa mina kontakter"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$orderby=fullname asc&$top=20"
+    select: "fullname,emailaddress1,telephone1,_parentcustomerid_value"
+
+  count_active_contacts:
+    description: "How many active contacts? / Hur många aktiva kontakter?"
+    odata: "$filter=statecode eq 0&$count=true&$top=1&$select=contactid"
+    select: "contactid"

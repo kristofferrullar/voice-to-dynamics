@@ -1,0 +1,19 @@
+agent:
+  max_tool_iterations: 10
+  model: claude-sonnet-4-6
+  provider: anthropic
+conversation_host:
+  provider: claude
+  system_prompt: 'You are a voice assistant. Reply with exactly one short sentence
+    in English that acknowledges what the user asked. Do not perform the action yourself.
+    If the user speaks Swedish, reply in Swedish instead.
+
+    '
+stt:
+  filler_word_removal: false
+  language: en-US
+  provider: azure
+  silence_timeout_ms: 1500
+tts:
+  provider: azure
+  voice: en-US-AriaNeural

@@ -1,0 +1,84 @@
+entity:
+  logical_name: account
+  entity_set: accounts
+  display_name_sv: Konto
+
+intent_triggers:
+  - konto
+  - konton
+  - företag
+  - kund
+  - kunder
+  - organisation
+  - organisationer
+  - account
+  - accounts
+
+attributes:
+  - logical_name: accountid
+    display_name_sv: ID
+    type: guid
+    filterable: false
+    selectable: true
+
+  - logical_name: name
+    display_name_sv: namn, företagsnamn
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: statecode
+    display_name_sv: status, aktiv, inaktiv
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      active: 0
+      inactive: 1
+
+  - logical_name: telephone1
+    display_name_sv: telefon, telefonnummer
+    type: string
+    filterable: false
+    selectable: true
+
+  - logical_name: emailaddress1
+    display_name_sv: e-post, email
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: address1_city
+    display_name_sv: stad, ort
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: _ownerid_value
+    display_name_sv: ägare, ansvarig, min, mina
+    type: lookup
+    filterable: true
+    selectable: true
+
+  - logical_name: revenue
+    display_name_sv: omsättning, intäkt
+    type: money
+    filterable: true
+    selectable: true
+
+  - logical_name: numberofemployees
+    display_name_sv: antal anställda, anställda
+    type: int
+    filterable: true
+    selectable: true
+
+query_templates:
+  list_my_accounts:
+    description: "Show my accounts / Visa mina konton"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$orderby=name asc&$top=20"
+    select: "name,telephone1,address1_city,revenue"
+
+  count_active_accounts:
+    description: "How many active accounts are there? / Hur många aktiva konton finns det?"
+    odata: "$filter=statecode eq 0&$count=true&$top=1&$select=accountid"
+    select: "accountid"

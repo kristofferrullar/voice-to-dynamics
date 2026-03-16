@@ -1,0 +1,82 @@
+entity:
+  logical_name: task
+  entity_set: tasks
+  display_name_sv: Uppgift / Aktivitet
+
+intent_triggers:
+  - uppgift
+  - uppgifter
+  - aktivitet
+  - aktiviteter
+  - task
+  - tasks
+  - att göra
+  - todo
+  - åtgärd
+
+attributes:
+  - logical_name: activityid
+    display_name_sv: ID
+    type: guid
+    filterable: false
+    selectable: true
+
+  - logical_name: subject
+    display_name_sv: ämne, rubrik, titel
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: statecode
+    display_name_sv: status, öppen, slutförd, avbruten
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      open: 0
+      completed: 1
+      cancelled: 2
+
+  - logical_name: scheduledend
+    display_name_sv: förfallodatum, deadline, klar senast
+    type: date
+    filterable: true
+    selectable: true
+
+  - logical_name: prioritycode
+    display_name_sv: prioritet, hög, normal, låg
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      low: 0
+      normal: 1
+      high: 2
+
+  - logical_name: _ownerid_value
+    display_name_sv: ägare, ansvarig, tilldelad, min, mina
+    type: lookup
+    filterable: true
+    selectable: true
+
+  - logical_name: description
+    display_name_sv: beskrivning, anteckningar
+    type: string
+    filterable: false
+    selectable: true
+
+query_templates:
+  list_my_open_tasks:
+    description: "Show my open tasks / Visa mina öppna uppgifter"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$orderby=scheduledend asc&$top=10"
+    select: "subject,scheduledend,prioritycode"
+
+  count_my_open_tasks:
+    description: "How many open tasks do I have? / Hur många uppgifter har jag?"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$count=true&$top=1&$select=activityid"
+    select: "activityid"
+
+  list_overdue_tasks:
+    description: "Show overdue tasks / Visa försenade uppgifter"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id} and scheduledend lt {today}&$orderby=scheduledend asc"
+    select: "subject,scheduledend,prioritycode"

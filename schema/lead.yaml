@@ -1,0 +1,81 @@
+entity:
+  logical_name: lead
+  entity_set: leads
+  display_name_sv: Lead
+
+intent_triggers:
+  - lead
+  - leads
+  - potentiell kund
+  - potentiella kunder
+  - prospekt
+  - intressent
+
+attributes:
+  - logical_name: leadid
+    display_name_sv: ID
+    type: guid
+    filterable: false
+    selectable: true
+
+  - logical_name: fullname
+    display_name_sv: namn
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: companyname
+    display_name_sv: företag, bolag
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: emailaddress1
+    display_name_sv: e-post, email
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: statecode
+    display_name_sv: status, öppen, kvalificerad, diskvalificerad
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      open: 0
+      qualified: 1
+      disqualified: 2
+
+  - logical_name: leadsourcecode
+    display_name_sv: källa, ursprung
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      advertisement: 1
+      employee_referral: 2
+      web: 8
+      word_of_mouth: 9
+
+  - logical_name: _ownerid_value
+    display_name_sv: ägare, ansvarig, min, mina
+    type: lookup
+    filterable: true
+    selectable: true
+
+  - logical_name: createdon
+    display_name_sv: skapad, skapat datum
+    type: date
+    filterable: true
+    selectable: true
+
+query_templates:
+  count_open_leads_owned_by_me:
+    description: "How many open leads do I have? / Hur många leads har jag?"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$count=true&$top=1&$select=leadid"
+    select: "leadid"
+
+  list_my_open_leads:
+    description: "Show my open leads / Visa mina leads"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$orderby=createdon desc&$top=10"
+    select: "fullname,companyname,emailaddress1,createdon"

@@ -1,0 +1,39 @@
+# Dataverse table whitelist.
+# The MCP tools will refuse to operate on any table not listed here.
+# permissions: query | count | create | update | delete
+
+allowed_tables:
+  opportunity:
+    entity_set: opportunities
+    display_name: Affärsmöjlighet
+    permissions: [query, count, update]
+
+  account:
+    entity_set: accounts
+    display_name: Konto
+    permissions: [query, count]
+
+  contact:
+    entity_set: contacts
+    display_name: Kontakt
+    permissions: [query, count]
+
+  lead:
+    entity_set: leads
+    display_name: Lead
+    permissions: [query, count, create, update]
+
+  task:
+    entity_set: tasks
+    display_name: Uppgift
+    permissions: [query, count, create]
+
+  phonecall:
+    entity_set: phonecalls
+    display_name: Telefonsamtal
+    permissions: [query, count, create]
+
+  systemuser:
+    entity_set: systemusers
+    display_name: Användare
+    permissions: [query]

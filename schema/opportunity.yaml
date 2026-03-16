@@ -1,0 +1,104 @@
+entity:
+  logical_name: opportunity
+  entity_set: opportunities
+  display_name_sv: Affärsmöjlighet
+
+intent_triggers:
+  - affärsmöjlighet
+  - affärsmöjligheter
+  - möjlighet
+  - möjligheter
+  - deal
+  - deals
+  - opportunity
+  - opportunities
+  - affär
+  - affärer
+  - försäljning
+
+attributes:
+  - logical_name: opportunityid
+    display_name_sv: ID
+    type: guid
+    filterable: false
+    selectable: true
+
+  - logical_name: name
+    display_name_sv: namn, rubrik, titel
+    type: string
+    filterable: true
+    selectable: true
+
+  - logical_name: statecode
+    display_name_sv: status, öppen, vunnen, förlorad, aktiv
+    type: optionset
+    filterable: true
+    selectable: true
+    common_values:
+      open: 0
+      won: 1
+      lost: 2
+
+  - logical_name: statuscode
+    display_name_sv: statusorsak
+    type: optionset
+    filterable: true
+    selectable: true
+
+  - logical_name: estimatedvalue
+    display_name_sv: estimerat värde, värde, belopp, storlek
+    type: money
+    filterable: true
+    selectable: true
+
+  - logical_name: estimatedclosedate
+    display_name_sv: beräknat stängningsdatum, stänger, close date
+    type: date
+    filterable: true
+    selectable: true
+
+  - logical_name: _ownerid_value
+    display_name_sv: ägare, ansvarig, säljare, min, mina, jag
+    type: lookup
+    filterable: true
+    selectable: true
+    note: "Use get_current_user tool to resolve current user id for 'my' / 'mine' queries"
+
+  - logical_name: _parentaccountid_value
+    display_name_sv: konto, företag, kund, organisation
+    type: lookup
+    filterable: true
+    selectable: true
+
+  - logical_name: closeprobability
+    display_name_sv: sannolikhet, chans
+    type: int
+    filterable: true
+    selectable: true
+
+  - logical_name: createdon
+    display_name_sv: skapad, skapat datum
+    type: date
+    filterable: true
+    selectable: true
+
+query_templates:
+  count_open_owned_by_me:
+    description: "How many open opportunities do I have? / Hur många öppna affärsmöjligheter har jag?"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$count=true&$top=1&$select=opportunityid"
+    select: "opportunityid"
+
+  list_open_owned_by_me:
+    description: "Show me my open opportunities / Visa mina öppna affärsmöjligheter"
+    odata: "$filter=statecode eq 0 and _ownerid_value eq {current_user_id}&$orderby=estimatedclosedate asc&$top=10"
+    select: "name,estimatedvalue,estimatedclosedate,statuscode"
+
+  list_closing_this_month:
+    description: "Opportunities closing this month / Affärsmöjligheter som stänger denna månad"
+    odata: "$filter=statecode eq 0 and estimatedclosedate ge {month_start} and estimatedclosedate le {month_end}&$orderby=estimatedclosedate asc"
+    select: "name,estimatedvalue,estimatedclosedate,_ownerid_value"
+
+  count_all_open:
+    description: "How many open opportunities are there in total? / Hur många öppna affärsmöjligheter finns det totalt?"
+    odata: "$filter=statecode eq 0&$count=true&$top=1&$select=opportunityid"
+    select: "opportunityid"

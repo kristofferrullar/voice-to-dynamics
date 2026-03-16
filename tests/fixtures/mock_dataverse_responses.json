@@ -1,0 +1,32 @@
+{
+  "whoami": {
+    "UserId": "00000000-0000-0000-0000-000000000001",
+    "BusinessUnitId": "00000000-0000-0000-0000-000000000002",
+    "OrganizationId": "00000000-0000-0000-0000-000000000003"
+  },
+  "count_opportunities": {
+    "@odata.count": 7,
+    "value": [
+      {"opportunityid": "00000000-0000-0000-0000-000000000010"}
+    ]
+  },
+  "list_opportunities": {
+    "@odata.context": "https://org.crm4.dynamics.com/api/data/v9.2/$metadata#opportunities",
+    "value": [
+      {
+        "opportunityid": "00000000-0000-0000-0000-000000000010",
+        "name": "Exempel affärsmöjlighet 1",
+        "statecode": 0,
+        "estimatedvalue": 150000,
+        "estimatedclosedate": "2026-06-30"
+      },
+      {
+        "opportunityid": "00000000-0000-0000-0000-000000000011",
+        "name": "Exempel affärsmöjlighet 2",
+        "statecode": 0,
+        "estimatedvalue": 280000,
+        "estimatedclosedate": "2026-07-15"
+      }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+# MCP server registry.
+# Add any MCP server here — stdio (subprocess) or sse (HTTP/SSE).
+# The MCPRegistry in src/mcp/registry.py connects all enabled servers at startup
+# and exposes their combined tool list to the agent.
+#
+# See docs/adding_mcp_server.md for a step-by-step guide.
+
+servers:
+  - name: dataverse
+    enabled: true
+    transport: stdio
+    command: [".venv/bin/python3", "-m", "mcp_servers.dataverse.server"]
+    description: "Microsoft Dataverse / Dynamics 365 — query, create, update records"
+
+  - name: github
+    enabled: true
+    transport: stdio
+    # Sources .env so GITHUB_PERSONAL_ACCESS_TOKEN is available to npx
+    command: ["bash", "-c", "export GITHUB_PERSONAL_ACCESS_TOKEN=$(grep '^GITHUB_PERSONAL_ACCESS_TOKEN=' .env | cut -d= -f2-) && exec npx -y @modelcontextprotocol/server-github"]
+    description: "GitHub — search repos, read files, manage issues and pull requests"
+
+  # Example: add a SharePoint MCP server (SSE transport)
+  # - name: sharepoint
+  #   enabled: false
+  #   transport: sse
+  #   url: http://localhost:8001/sse
+  #   description: "SharePoint document and list operations"
+
+  # Example: add a custom stdio server
+  # - name: my_service
+  #   enabled: false
+  #   transport: stdio
+  #   command: ["node", "path/to/my-mcp-server/index.js"]
+  #   description: "Custom service integration"

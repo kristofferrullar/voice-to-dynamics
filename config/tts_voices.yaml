@@ -1,0 +1,22 @@
+# TTS voice mappings per provider and locale.
+# The active voice is set in pipeline.yaml (tts.voice).
+
+azure:
+  sv-SE:
+    - name: sv-SE-MattiasNeural
+      gender: male
+      style: conversational
+    - name: sv-SE-SofieNeural
+      gender: female
+      style: conversational
+    - name: sv-SE-HilleviNeural
+      gender: female
+      style: newscast
+  en-US:
+    - name: en-US-AriaNeural
+      gender: female
+      style: conversational
+
+openai:
+  default: alloy
+  voices: [alloy, echo, fable, onyx, nova, shimmer]
