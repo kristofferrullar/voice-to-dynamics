@@ -10,29 +10,48 @@ import logging
 from typing import Any
 
 from src.agent.intent_models import ActionRecord, AgentResponse
+from src.agent.memory import ConversationMemory
 from src.agent.prompt_builder import build as build_system_prompt
 from src.mcp.registry import MCPRegistry
 from src.providers.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+_STOP_REASON_TOOL_USE = "tool_use"
 
-class DataverseAgent:
-    def __init__(self, llm: LLMProvider, mcp: MCPRegistry, max_iterations: int = 10) -> None:
+
+class MCPAgent:
+    """General-purpose agent that routes requests through any connected MCP server."""
+
+    def __init__(
+        self,
+        llm: LLMProvider,
+        mcp: MCPRegistry,
+        max_iterations: int = 10,
+        memory: ConversationMemory | None = None,
+    ) -> None:
         self._llm = llm
         self._mcp = mcp
         self._max_iterations = max_iterations
+        self._memory = memory or ConversationMemory(enabled=False)
+        # Built lazily on the first process() call using the live server list,
+        # so the prompt accurately reflects whichever MCPs actually connected.
         self._system_prompt: str | None = None
 
-    async def _get_system_prompt(self) -> str:
-        if not self._system_prompt:
-            self._system_prompt = build_system_prompt()
-        return self._system_prompt
+    def reset_memory(self) -> None:
+        """Clear all conversation history."""
+        self._memory.reset()
 
     async def process(self, utterance: str) -> AgentResponse:
-        system = await self._get_system_prompt()
+        # Build the prompt once per agent lifetime from the live server summaries.
+        if self._system_prompt is None:
+            self._system_prompt = build_system_prompt(self._mcp.get_server_summaries())
+        system = self._system_prompt
         tools = _convert_tools(await self._mcp.get_tools())
-        messages: list[dict[str, Any]] = [{"role": "user", "content": utterance}]
+
+        history = self._memory.get_history()
+        messages: list[dict[str, Any]] = history + [{"role": "user", "content": utterance}]
+        turn_start = len(history)
         actions: list[ActionRecord] = []
 
         for _ in range(self._max_iterations):
@@ -40,12 +59,11 @@ class DataverseAgent:
             stop_reason = response.get("stop_reason", "end_turn")
             content = response.get("content", [])
 
-            # Append assistant message
             messages.append({"role": "assistant", "content": content})
 
-            if stop_reason != "tool_use":
-                # Final text response
+            if stop_reason != _STOP_REASON_TOOL_USE:
                 text = _extract_text(content)
+                self._memory.add_turn(messages[turn_start:])
                 return AgentResponse(
                     result_summary=text,
                     intention=utterance,
@@ -58,7 +76,7 @@ class DataverseAgent:
             # Process tool calls
             tool_results: list[dict[str, Any]] = []
             for block in content:
-                if block.get("type") != "tool_use":
+                if block.get("type") != _STOP_REASON_TOOL_USE:
                     continue
                 tool_name = block["name"]
                 tool_args = block.get("input", {})
@@ -80,8 +98,9 @@ class DataverseAgent:
 
             messages.append({"role": "user", "content": tool_results})
 
+        self._memory.add_turn(messages[turn_start:])
         return AgentResponse(
-            result_summary="Förlåt, jag kunde inte slutföra din förfrågan.",
+            result_summary="Sorry, I wasn't able to complete your request.",
             intention=utterance,
             extracted_data={},
             mapped_entity="unknown",
@@ -91,22 +110,24 @@ class DataverseAgent:
         )
 
 
+# Backward-compatible alias — existing imports continue to work.
+DataverseAgent = MCPAgent
+
+
 def _extract_text(content: list[dict[str, Any]]) -> str:
     for block in content:
         if block.get("type") == "text":
             return block.get("text", "")
-    return "Klart."
+    return "Done."
 
 
 def _convert_tools(mcp_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert MCP tool format to Anthropic tool format."""
-    converted = []
-    for tool in mcp_tools:
-        converted.append(
-            {
-                "name": tool.get("name"),
-                "description": tool.get("description", ""),
-                "input_schema": tool.get("inputSchema", {"type": "object", "properties": {}}),
-            }
-        )
-    return converted
+    return [
+        {
+            "name": tool.get("name"),
+            "description": tool.get("description", ""),
+            "input_schema": tool.get("inputSchema", {"type": "object", "properties": {}}),
+        }
+        for tool in mcp_tools
+    ]

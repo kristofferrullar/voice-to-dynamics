@@ -18,7 +18,6 @@ Setup checklist (see docs/channels.md):
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import httpx
 import jwt as pyjwt
@@ -30,11 +29,11 @@ _OIDC_URL  = "https://login.botframework.com/v1/.well-known/openid-configuration
 _TOKEN_URL = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
 _SCOPE     = "https://api.botframework.com/.default"
 
-# Simple in-memory JWKS cache (refresh if key not found)
-_jwks_cache: dict[str, Any] | None = None
+# In-memory JWKS cache — refreshed automatically on key rotation
+_jwks_cache: dict | None = None
 
 
-async def _get_jwks() -> dict[str, Any]:
+async def _get_jwks() -> dict:
     global _jwks_cache
     if _jwks_cache:
         return _jwks_cache
@@ -44,6 +43,13 @@ async def _get_jwks() -> dict[str, Any]:
     return _jwks_cache
 
 
+async def _refresh_jwks() -> dict:
+    """Force a fresh JWKS fetch (called when a key ID is not found)."""
+    global _jwks_cache
+    _jwks_cache = None
+    return await _get_jwks()
+
+
 async def verify_request(authorization: str | None, app_id: str) -> bool:
     """Return True if the Bearer token is a valid Bot Framework JWT for our app."""
     if not app_id or not authorization or not authorization.startswith("Bearer "):
@@ -51,22 +57,15 @@ async def verify_request(authorization: str | None, app_id: str) -> bool:
     token = authorization[7:]
     try:
         header = pyjwt.get_unverified_header(token)
+        kid = header.get("kid")
         jwks = await _get_jwks()
-        key_data = next(
-            (k for k in jwks.get("keys", []) if k.get("kid") == header.get("kid")),
-            None,
-        )
+        key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if not key_data:
-            # Refresh JWKS once in case of key rotation
-            global _jwks_cache
-            _jwks_cache = None
-            jwks = await _get_jwks()
-            key_data = next(
-                (k for k in jwks.get("keys", []) if k.get("kid") == header.get("kid")),
-                None,
-            )
+            # Refresh once in case of key rotation, then try again
+            jwks = await _refresh_jwks()
+            key_data = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if not key_data:
-            logger.warning("Teams: no matching JWKS key for kid=%s", header.get("kid"))
+            logger.warning("Teams: no matching JWKS key for kid=%s", kid)
             return False
         public_key = pyjwt.algorithms.RSAAlgorithm.from_jwk(key_data)  # type: ignore[attr-defined]
         pyjwt.decode(token, public_key, algorithms=["RS256"], audience=app_id)
@@ -100,16 +99,24 @@ async def send_reply(
     app_password: str,
 ) -> None:
     """Send a text reply via the Bot Connector REST API."""
-    token = await _get_connector_token(app_id, app_password)
+    try:
+        token = await _get_connector_token(app_id, app_password)
+    except Exception as exc:
+        logger.error("Teams: failed to acquire connector token: %s", exc)
+        return
+
     url = (
         f"{service_url.rstrip('/')}/v3/conversations"
         f"/{conversation_id}/activities/{reply_to_id}"
     )
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            json={"type": "message", "text": text},
-        )
-        if resp.status_code not in (200, 201):
-            logger.error("Teams reply failed %s: %s", resp.status_code, resp.text)
+        try:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json={"type": "message", "text": text},
+            )
+            if resp.status_code not in (200, 201):
+                logger.error("Teams reply failed %s: %s", resp.status_code, resp.text)
+        except Exception as exc:
+            logger.error("Teams: failed to send reply: %s", exc)

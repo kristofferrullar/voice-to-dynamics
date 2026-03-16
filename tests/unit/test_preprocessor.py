@@ -10,7 +10,8 @@ def preprocessor():
 
 def test_removes_hesitations(preprocessor):
     assert preprocessor.clean("Emh, hur många konton finns det?") == "Hur många konton finns det?"
-    assert preprocessor.clean("Öh kan du visa mina leads?") == "kan du visa mina leads?"
+    # First word is capitalised because it is now the sentence opener
+    assert preprocessor.clean("Öh kan du visa mina leads?") == "Kan du visa mina leads?"
 
 
 def test_removes_fillers(preprocessor):

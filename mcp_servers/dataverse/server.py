@@ -8,12 +8,12 @@ Start manually for testing:
 """
 from fastmcp import FastMCP
 
+from mcp_servers.dataverse.client import get_client
 from mcp_servers.dataverse.tools.count_tool import count_records
 from mcp_servers.dataverse.tools.create_tool import create_record
 from mcp_servers.dataverse.tools.delete_tool import delete_record
 from mcp_servers.dataverse.tools.query_tool import query_records
 from mcp_servers.dataverse.tools.update_tool import update_record
-from mcp_servers.dataverse.client import DataverseClient
 
 mcp = FastMCP(
     name="dataverse",
@@ -93,8 +93,7 @@ async def get_current_user() -> dict:
 
     Use this to resolve 'my' / 'mine' queries before filtering by _ownerid_value.
     """
-    client = DataverseClient()
-    return await client.get_current_user()
+    return await get_client().get_current_user()
 
 
 if __name__ == "__main__":

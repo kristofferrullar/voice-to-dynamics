@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_servers.dataverse.client import DataverseClient
+from mcp_servers.dataverse.client import get_client
 from mcp_servers.dataverse.models import CreateResult
 from mcp_servers.dataverse.tools._validation import validate_table, validate_columns
 
@@ -18,6 +18,5 @@ async def create_record(table_name: str, data: dict[str, Any]) -> dict:
     entity_set = validate_table(table_name, required_permission="create")
     validate_columns(table_name, list(data.keys()))
 
-    client = DataverseClient()
-    record_id = await client.post(entity_set, data)
+    record_id = await get_client().post(entity_set, data)
     return CreateResult(record_id=record_id, entity_set=entity_set).model_dump()

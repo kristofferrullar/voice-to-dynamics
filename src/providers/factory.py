@@ -68,7 +68,9 @@ class ProviderFactory:
         provider = host_cfg.get("provider", "azure_realtime")
         system_prompt = host_cfg.get(
             "system_prompt",
-            "Svara med exakt en kort mening på svenska som bekräftar vad användaren frågat om.",
+            "You are a voice assistant. Reply with exactly one short sentence that acknowledges "
+            "what the user asked. Do not perform the action yourself. "
+            "If the user speaks Swedish, reply in Swedish instead.",
         )
 
         match provider:
@@ -95,6 +97,14 @@ class ProviderFactory:
                 return AzureOpenAILLMProvider()
             case _:
                 raise ValueError(f"Unknown agent LLM provider: '{provider}'")
+
+    def get_memory(self) -> "ConversationMemory":
+        from src.agent.memory import ConversationMemory
+        memory_cfg = self._cfg.get("agent", {}).get("memory", {})
+        return ConversationMemory(
+            enabled=memory_cfg.get("enabled", True),
+            max_turns=memory_cfg.get("max_turns", 10),
+        )
 
     @property
     def agent_config(self) -> dict[str, Any]:

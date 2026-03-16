@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_servers.dataverse.client import DataverseClient
+from mcp_servers.dataverse.client import get_client
 from mcp_servers.dataverse.models import UpdateResult
 from mcp_servers.dataverse.tools._validation import validate_table, validate_columns
 
@@ -19,8 +19,7 @@ async def update_record(table_name: str, record_id: str, data: dict[str, Any]) -
     entity_set = validate_table(table_name, required_permission="update")
     validate_columns(table_name, list(data.keys()))
 
-    client = DataverseClient()
-    await client.patch(entity_set, record_id, data)
+    await get_client().patch(entity_set, record_id, data)
     return UpdateResult(
         record_id=record_id,
         entity_set=entity_set,

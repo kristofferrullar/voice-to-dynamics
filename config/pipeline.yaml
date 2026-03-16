@@ -2,6 +2,14 @@ agent:
   max_tool_iterations: 10
   model: claude-sonnet-4-6
   provider: anthropic
+  memory:
+    enabled: true
+    max_turns: 10
+    reset_phrases:
+      - "new session"
+      - "starta om"
+      - "börja om"
+      - "reset"
 conversation_host:
   provider: claude
   system_prompt: 'You are a voice assistant. Reply with exactly one short sentence

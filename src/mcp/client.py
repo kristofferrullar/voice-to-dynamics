@@ -2,6 +2,13 @@
 
 Supports stdio (subprocess) and SSE (HTTP) transports.
 The registry uses this to connect to individual MCP servers.
+
+Concurrency safety
+──────────────────
+Each MCPClient that uses the stdio transport guards its stdin/stdout
+interaction with an asyncio.Lock.  This prevents two concurrent agent
+turns from interleaving their writes and reads to the same subprocess,
+which would corrupt the JSON-RPC stream and cause parse errors.
 """
 from __future__ import annotations
 
@@ -13,6 +20,9 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# How long to wait for a single response line from an MCP server subprocess.
+_STDIO_TIMEOUT_S = 30.0
 
 
 class MCPClient:
@@ -33,6 +43,9 @@ class MCPClient:
         self._http: httpx.AsyncClient | None = None
         self._tools_cache: list[dict[str, Any]] | None = None
         self._request_id = 0
+        # Serialises concurrent stdio writes+reads so two callers never
+        # interleave their JSON-RPC messages on the same subprocess pipe.
+        self._stdio_lock = asyncio.Lock()
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -60,9 +73,12 @@ class MCPClient:
                 },
             })
             # Acknowledge with initialized notification (no response expected).
-            notify = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n"
+            notify = (
+                json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+                + "\n"
+            )
             self._process.stdin.write(notify.encode())  # type: ignore[union-attr]
-            await self._process.stdin.drain()  # type: ignore[union-attr]
+            await self._process.stdin.drain()            # type: ignore[union-attr]
         elif self._transport == "sse":
             if not self._url:
                 raise ValueError(f"MCP server '{self.name}' requires 'url' for SSE transport")
@@ -76,6 +92,12 @@ class MCPClient:
             await self._process.wait()
         if self._http:
             await self._http.aclose()
+
+    def tool_names(self) -> list[str]:
+        """Return tool names from the cache (empty list if not yet fetched)."""
+        if self._tools_cache is None:
+            return []
+        return [t["name"] for t in self._tools_cache]
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self._tools_cache is not None:
@@ -106,27 +128,36 @@ class MCPClient:
     async def _stdio_rpc(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise RuntimeError(f"MCP stdio process '{self.name}' is not running")
-        line = json.dumps(payload) + "\n"
-        self._process.stdin.write(line.encode())
-        await self._process.stdin.drain()
-        # Read lines until a valid JSON-RPC response is found.
-        # Non-JSON lines (npm install output, warnings, etc.) are logged and skipped.
-        while True:
-            try:
-                raw = await asyncio.wait_for(self._process.stdout.readline(), timeout=30.0)
-            except asyncio.TimeoutError:
-                raise RuntimeError(f"MCP server '{self.name}' timed out waiting for response")
-            if not raw:
-                raise RuntimeError(f"MCP server '{self.name}' closed stdout unexpectedly")
-            text = raw.decode(errors="replace").strip()
-            if not text:
-                continue
-            try:
-                response = json.loads(text)
-                break
-            except json.JSONDecodeError:
-                logger.debug("MCP '%s' non-JSON line: %s", self.name, text)
-                continue
+
+        async with self._stdio_lock:
+            line = json.dumps(payload) + "\n"
+            self._process.stdin.write(line.encode())
+            await self._process.stdin.drain()
+            # Read lines until a valid JSON-RPC response is found.
+            # Non-JSON lines (npm install output, warnings, etc.) are logged and skipped.
+            while True:
+                try:
+                    raw = await asyncio.wait_for(
+                        self._process.stdout.readline(), timeout=_STDIO_TIMEOUT_S
+                    )
+                except asyncio.TimeoutError:
+                    raise RuntimeError(
+                        f"MCP server '{self.name}' timed out waiting for response"
+                    )
+                if not raw:
+                    raise RuntimeError(
+                        f"MCP server '{self.name}' closed stdout unexpectedly"
+                    )
+                text = raw.decode(errors="replace").strip()
+                if not text:
+                    continue
+                try:
+                    response = json.loads(text)
+                    break
+                except json.JSONDecodeError:
+                    logger.debug("MCP '%s' non-JSON line: %s", self.name, text)
+                    continue
+
         if "error" in response:
             raise RuntimeError(f"MCP error from '{self.name}': {response['error']}")
         return response.get("result", {})

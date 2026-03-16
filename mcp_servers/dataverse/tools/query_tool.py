@@ -1,7 +1,7 @@
 """query_records MCP tool — fetches records from a Dataverse table."""
 from __future__ import annotations
 
-from mcp_servers.dataverse.client import DataverseClient
+from mcp_servers.dataverse.client import get_client
 from mcp_servers.dataverse.models import QueryResult
 from mcp_servers.dataverse.tools._validation import validate_table, validate_columns, validate_filter
 
@@ -40,8 +40,7 @@ async def query_records(
     if include_count:
         query_parts.append("$count=true")
 
-    client = DataverseClient()
-    data = await client.get(entity_set, "&".join(query_parts))
+    data = await get_client().get(entity_set, "&".join(query_parts))
     total_count = int(data["@odata.count"]) if include_count and "@odata.count" in data else None
 
     return QueryResult(

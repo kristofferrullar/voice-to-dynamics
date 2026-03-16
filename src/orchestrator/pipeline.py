@@ -12,7 +12,7 @@ import asyncio
 import logging
 import signal
 
-from src.agent.agent import DataverseAgent
+from src.agent.agent import MCPAgent
 from src.mcp.registry import MCPRegistry
 from src.providers.conversation.base import ConversationHost
 from src.providers.factory import ProviderFactory
@@ -28,12 +28,14 @@ class VoicePipeline:
         stt: STTProvider,
         tts: TTSProvider,
         conversation_host: ConversationHost,
-        agent: DataverseAgent,
+        agent: MCPAgent,
+        reset_phrases: list[str] | None = None,
     ) -> None:
         self._stt = stt
         self._tts = tts
         self._host = conversation_host
         self._agent = agent
+        self._reset_phrases = [p.lower() for p in (reset_phrases or [])]
         self._running = False
 
     async def run_forever(self) -> None:
@@ -57,7 +59,18 @@ class VoicePipeline:
     async def stop(self) -> None:
         self._running = False
 
+    def _is_reset_command(self, text: str) -> bool:
+        if not self._reset_phrases:
+            return False
+        normalized = text.lower().strip()
+        return any(phrase in normalized for phrase in self._reset_phrases)
+
     async def _handle(self, text: str) -> None:
+        if self._is_reset_command(text):
+            self._agent.reset_memory()
+            await self._tts.speak("Memory cleared. Starting a new session.")
+            return
+
         # Run conversation host and agent concurrently
         host_task = asyncio.create_task(self._host.respond_audio(text))
         agent_task = asyncio.create_task(self._agent.process(text))
@@ -77,22 +90,25 @@ class VoicePipeline:
                 logger.warning("Agent error: %s", response.error)
         except Exception as exc:
             logger.error("Agent error: %s", exc)
-            await self._tts.speak("Förlåt, något gick fel. Försök igen.")
+            await self._tts.speak("Sorry, something went wrong. Please try again.")
 
 
-def build_pipeline() -> VoicePipeline:
+def build_pipeline() -> tuple[VoicePipeline, MCPRegistry]:
     """Build a VoicePipeline from config/pipeline.yaml and config/mcp_servers.yaml."""
     factory = ProviderFactory()
     tts = factory.get_tts()
     stt = factory.get_stt()
     host = factory.get_conversation_host(tts_speak_fn=tts.speak)
     llm = factory.get_llm()
+    memory = factory.get_memory()
     max_iter = factory.agent_config.get("max_tool_iterations", 10)
+    reset_phrases = factory.agent_config.get("memory", {}).get(
+        "reset_phrases", ["new session", "starta om", "börja om", "reset"]
+    )
 
-    mcp = MCPRegistry()
-
-    agent = DataverseAgent(llm=llm, mcp=mcp, max_iterations=max_iter)
-    return VoicePipeline(stt=stt, tts=tts, conversation_host=host, agent=agent), mcp
+    mcp   = MCPRegistry()
+    agent = MCPAgent(llm=llm, mcp=mcp, max_iterations=max_iter, memory=memory)
+    return VoicePipeline(stt=stt, tts=tts, conversation_host=host, agent=agent, reset_phrases=reset_phrases), mcp
 
 
 async def run() -> None:
@@ -101,7 +117,7 @@ async def run() -> None:
     pipeline, mcp = build_pipeline()
 
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(pipeline.stop()))
+    loop.add_signal_handler(signal.SIGINT,  lambda: asyncio.create_task(pipeline.stop()))
     loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(pipeline.stop()))
 
     await mcp.connect_all()

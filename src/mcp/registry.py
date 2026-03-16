@@ -28,10 +28,13 @@ class MCPRegistry:
 
     def __init__(self) -> None:
         self._servers: dict[str, MCPClient] = {}
-        self._tool_to_server: dict[str, str] = {}  # tool_name → server_name
+        self._tool_to_server: dict[str, str] = {}       # tool_name → server_name
+        self._server_descriptions: dict[str, str] = {}  # server_name → description
+        self._tools_cache: list[dict[str, Any]] | None = None  # merged, rebuilt on reconnect
 
     async def connect_all(self) -> None:
         """Connect to every enabled server listed in mcp_servers.yaml."""
+        self._tools_cache = None  # invalidate on reconnect
         config = self._load_config()
         for srv in config.get("servers", []):
             if not srv.get("enabled", False):
@@ -50,6 +53,7 @@ class MCPRegistry:
                 logger.warning("⚠️  MCP server '%s' failed to connect — skipping. (%s)", name, exc)
                 continue
             self._servers[name] = client
+            self._server_descriptions[name] = srv.get("description", "")
             for tool in tools:
                 tool_name = tool["name"]
                 if tool_name in self._tool_to_server:
@@ -68,13 +72,38 @@ class MCPRegistry:
             await client.disconnect()
         self._servers.clear()
         self._tool_to_server.clear()
+        self._server_descriptions.clear()
+        self._tools_cache = None
+
+    def get_server_summaries(self) -> list[dict[str, Any]]:
+        """Return a snapshot of connected servers with their tool names.
+
+        Used by the prompt builder to generate a dynamic tool section without
+        re-reading config files or making async calls.
+        """
+        return [
+            {
+                "name": name,
+                "description": self._server_descriptions.get(name, ""),
+                "tools": client.tool_names(),
+            }
+            for name, client in self._servers.items()
+        ]
 
     async def get_tools(self) -> list[dict[str, Any]]:
-        """Return a merged list of all tools from all connected servers."""
+        """Return a merged list of all tools from all connected servers.
+
+        The result is cached after the first call and stays valid for the
+        lifetime of the current connections (i.e. until disconnect_all /
+        connect_all is called again).
+        """
+        if self._tools_cache is not None:
+            return self._tools_cache
         tools: list[dict[str, Any]] = []
         for client in self._servers.values():
             tools.extend(await client.list_tools())
-        return tools
+        self._tools_cache = tools
+        return self._tools_cache
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool by name, routing to the correct server."""

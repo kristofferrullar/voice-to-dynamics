@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-from mcp_servers.dataverse.client import DataverseClient
+from mcp_servers.dataverse.client import get_client
 from mcp_servers.dataverse.models import DeleteResult
 from mcp_servers.dataverse.tools._validation import validate_table
 
@@ -26,6 +26,5 @@ async def delete_record(table_name: str, record_id: str) -> dict:
             "delete_record is disabled. Set ALLOW_DATAVERSE_DELETE=true in .env to enable."
         )
     entity_set = validate_table(table_name, required_permission="delete")
-    client = DataverseClient()
-    await client.delete(entity_set, record_id)
+    await get_client().delete(entity_set, record_id)
     return DeleteResult(record_id=record_id, entity_set=entity_set, success=True).model_dump()

@@ -4,6 +4,12 @@ so every incoming message doesn't pay a cold-start penalty.
 Usage:
     from src.channels.handler import channel_handler
     reply = await channel_handler.process("List my open opportunities")
+
+Concurrency
+───────────
+The singleton is safe for concurrent use from multiple channel webhooks.
+Concurrent requests share the same MCPRegistry, which serialises per-server
+stdio I/O via an asyncio.Lock inside each MCPClient.
 """
 from __future__ import annotations
 
@@ -31,7 +37,7 @@ class ChannelHandler:
 
     async def _connect(self) -> None:
         from src.mcp.registry import MCPRegistry          # noqa: PLC0415
-        from src.agent.agent import DataverseAgent        # noqa: PLC0415
+        from src.agent.agent import MCPAgent              # noqa: PLC0415
         from src.providers.factory import ProviderFactory # noqa: PLC0415
 
         factory     = ProviderFactory()
@@ -39,7 +45,7 @@ class ChannelHandler:
         self._mcp   = MCPRegistry()
         await self._mcp.connect_all()
         max_iter    = factory.agent_config.get("max_tool_iterations", 10)
-        self._agent = DataverseAgent(llm=llm, mcp=self._mcp, max_iterations=max_iter)
+        self._agent = MCPAgent(llm=llm, mcp=self._mcp, max_iterations=max_iter)
         self._ready = True
         logger.info("ChannelHandler: agent ready")
 

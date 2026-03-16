@@ -1,0 +1,10 @@
+services:
+  voice-mcp:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file: .env          # copy .env.example → .env and fill in your values
+    restart: unless-stopped
+    volumes:
+      # Mount config so you can edit pipeline.yaml / mcp_servers.yaml without rebuilding
+      - ./config:/app/config

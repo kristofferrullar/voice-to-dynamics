@@ -19,7 +19,7 @@ _HESITATIONS = re.compile(
     re.IGNORECASE,
 )
 
-# Swedish filler words — stripped only at utterance boundaries or between clauses
+# Swedish filler words — stripped at utterance boundaries or between clauses
 # to avoid accidentally removing meaningful words.
 _FILLERS = re.compile(
     r"\b(liksom|alltså|typ|ba|asså|nånting|liksom sagt|va)\b",
@@ -32,11 +32,17 @@ _REPETITION = re.compile(
     re.IGNORECASE,
 )
 
+# Duplicate commas produced by filler removal: ",  ," or ",," → ","
+_DUPLICATE_PUNCT = re.compile(r",[\s,]+,")
+
+# Trailing punctuation left by removals: "word  ," → "word,"
+_ORPHAN_PUNCT = re.compile(r"\s+([,.])")
+
+# Leading punctuation/whitespace left by hesitation removal: ", word" → "word"
+_LEADING_PUNCT = re.compile(r"^[\s,\.]+")
+
 # Multiple spaces / leading-trailing whitespace
 _SPACES = re.compile(r"\s{2,}")
-
-# Trailing punctuation left by removals
-_ORPHAN_PUNCT = re.compile(r"\s+([,.])")
 
 
 class SwedishPreprocessor:
@@ -48,6 +54,12 @@ class SwedishPreprocessor:
         # Collapse repetitions (run twice to catch overlapping patterns)
         for _ in range(2):
             text = _REPETITION.sub(r"\1", text)
+        text = _DUPLICATE_PUNCT.sub(",", text)
         text = _ORPHAN_PUNCT.sub(r"\1", text)
+        text = _LEADING_PUNCT.sub("", text)
         text = _SPACES.sub(" ", text)
-        return text.strip()
+        text = text.strip()
+        # Re-capitalise the first letter if the hesitation removal lowercased it
+        if text:
+            text = text[0].upper() + text[1:]
+        return text

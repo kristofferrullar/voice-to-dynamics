@@ -35,8 +35,10 @@ import logging
 import os
 import signal
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 import yaml
@@ -64,11 +66,14 @@ logger = logging.getLogger(__name__)
 # ── global state ───────────────────────────────────────────────────────────────
 _proc:   asyncio.subprocess.Process | None = None
 _status: str = "stopped"          # stopped | running | paused
-_log_lines: list[str]             = []
-_MAX_LOG                          = 300
-_log_queues: list[asyncio.Queue[str]] = []
 
-# Active ACS call state: call_id → {call_connection_id, language}
+# deque gives O(1) append and O(1) left-truncation vs O(n) del list[0]
+_log_lines: deque[str] = deque(maxlen=300)
+
+# set gives O(1) add/discard vs O(n) list.remove
+_log_queues: set[asyncio.Queue[str]] = set()
+
+# Active ACS call state: call_connection_id → {language, caller}
 _acs_calls: dict[str, dict[str, Any]] = {}
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -87,9 +92,7 @@ def _save_mcp(cfg: dict[str, Any]) -> None:
 
 def _push_log(line: str) -> None:
     _log_lines.append(line)
-    if len(_log_lines) > _MAX_LOG:
-        del _log_lines[0]
-    for q in list(_log_queues):
+    for q in _log_queues:
         q.put_nowait(line)
 
 async def _drain_stream(stream: asyncio.StreamReader | None) -> None:
@@ -105,6 +108,13 @@ async def _watch(proc: asyncio.subprocess.Process) -> None:
     _status = "stopped"
     _proc   = None
     _push_log("■ Voice session ended")
+
+def _parse_acs_endpoint(connection_string: str) -> str:
+    """Extract the HTTPS endpoint URL from an ACS connection string."""
+    for part in connection_string.split(";"):
+        if part.lower().startswith("endpoint="):
+            return part[9:].rstrip("/")
+    return ""
 
 def _get_settings():
     from config.settings import get_settings  # noqa: PLC0415
@@ -200,10 +210,11 @@ async def resume_session() -> dict[str, Any]:
 async def log_stream() -> StreamingResponse:
     """Server-Sent Events stream of all log lines."""
     q: asyncio.Queue[str] = asyncio.Queue()
-    _log_queues.append(q)
+    _log_queues.add(q)
 
     async def generate():
-        for line in _log_lines[-80:]:
+        # Replay recent history to new subscribers
+        for line in list(_log_lines)[-80:]:
             yield f"data: {json.dumps(line)}\n\n"
         try:
             while True:
@@ -215,8 +226,7 @@ async def log_stream() -> StreamingResponse:
         except asyncio.CancelledError:
             pass
         finally:
-            if q in _log_queues:
-                _log_queues.remove(q)
+            _log_queues.discard(q)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -285,11 +295,11 @@ async def save_config(req: PipelineConfigRequest) -> dict[str, Any]:
             cfg[section] = values
     _save_pipeline(cfg)
     _push_log("⚙️ Pipeline config updated")
-    # Invalidate prompt cache if agent changed
+    # Invalidate prompt cache and force agent reconnect on next message
     try:
         from src.agent.prompt_builder import invalidate_cache  # noqa: PLC0415
         invalidate_cache()
-        from src.channels.handler import channel_handler  # noqa: PLC0415
+        from src.channels.handler import channel_handler      # noqa: PLC0415
         channel_handler.invalidate()
     except Exception:
         pass
@@ -330,7 +340,7 @@ async def toggle_mcp_server(req: MCPToggleRequest) -> dict[str, Any]:
     return {"ok": True, "name": req.name, "enabled": req.enabled}
 
 
-# ── Config — channels (credential status) ──────────────────────────────────────
+# ── Config — channel credential status ─────────────────────────────────────────
 
 @app.get("/config/channels")
 async def get_channel_config() -> dict[str, Any]:
@@ -342,14 +352,14 @@ async def get_channel_config() -> dict[str, Any]:
             "app_id":     s.teams_app_id or "",
         },
         "whatsapp": {
-            "configured":    bool(s.twilio_account_sid and s.twilio_auth_token),
-            "account_sid":   s.twilio_account_sid[:8] + "…" if s.twilio_account_sid else "",
-            "phone_number":  s.twilio_whatsapp_number or "",
+            "configured":   bool(s.twilio_account_sid and s.twilio_auth_token),
+            "account_sid":  s.twilio_account_sid[:8] + "…" if s.twilio_account_sid else "",
+            "phone_number": s.twilio_whatsapp_number or "",
         },
         "acs_voice": {
-            "configured":    bool(s.acs_connection_string),
-            "phone_number":  s.acs_phone_number or "",
-            "callback_url":  s.acs_callback_url or "",
+            "configured":   bool(s.acs_connection_string),
+            "phone_number": s.acs_phone_number or "",
+            "callback_url": s.acs_callback_url or "",
         },
     }
 
@@ -361,19 +371,16 @@ async def teams_webhook(request: Request) -> dict[str, Any]:
     from src.channels import teams as teams_adapter   # noqa: PLC0415
     from src.channels.handler import channel_handler  # noqa: PLC0415
 
-    s     = _get_settings()
-    auth  = request.headers.get("Authorization")
+    s    = _get_settings()
+    auth = request.headers.get("Authorization")
 
     if not await teams_adapter.verify_request(auth, s.teams_app_id):
         _push_log("⚠️ Teams: rejected request (bad JWT)")
         raise HTTPException(401, "Unauthorized")
 
     body: dict[str, Any] = await request.json()
-    activity_type = body.get("type", "")
-
-    if activity_type != "message":
-        # Acknowledge non-message activities silently
-        return {"ok": True}
+    if body.get("type") != "message":
+        return {"ok": True}  # Acknowledge non-message activities silently
 
     text = body.get("text", "").strip()
     if not text:
@@ -385,7 +392,6 @@ async def teams_webhook(request: Request) -> dict[str, Any]:
     from_name       = body.get("from", {}).get("name", "someone")
 
     _push_log(f"📨 Teams [{from_name}]: {text}")
-
     reply_text = await channel_handler.process(text)
     _push_log(f"🤖 Teams reply: {reply_text}")
 
@@ -398,7 +404,6 @@ async def teams_webhook(request: Request) -> dict[str, Any]:
             app_id          = s.teams_app_id,
             app_password    = s.teams_app_password,
         )
-
     return {"ok": True}
 
 
@@ -412,25 +417,23 @@ async def whatsapp_webhook(request: Request) -> PlainTextResponse:
     s = _get_settings()
 
     form_bytes = await request.body()
-    from urllib.parse import parse_qs  # noqa: PLC0415
-    raw = parse_qs(form_bytes.decode(), keep_blank_values=True)
+    raw  = parse_qs(form_bytes.decode(), keep_blank_values=True)
     form: dict[str, str] = {k: v[0] for k, v in raw.items()}
 
+    # Always verify when credentials are present; reject if verification fails
     sig = request.headers.get("X-Twilio-Signature")
-    url = str(request.url)
+    if s.twilio_auth_token:
+        if not wa_adapter.verify_request(s.twilio_auth_token, str(request.url), form, sig):
+            _push_log("⚠️ WhatsApp: rejected request (bad signature)")
+            raise HTTPException(403, "Forbidden")
 
-    if s.twilio_auth_token and not wa_adapter.verify_request(s.twilio_auth_token, url, form, sig):
-        _push_log("⚠️ WhatsApp: rejected request (bad signature)")
-        raise HTTPException(403, "Forbidden")
-
-    msg = wa_adapter.parse_incoming(form)
+    msg  = wa_adapter.parse_incoming(form)
     text = msg["body"]
     if not text:
         return PlainTextResponse(wa_adapter.twiml_empty(), media_type="text/xml")
 
     from_number = msg["from_number"]
     _push_log(f"📱 WhatsApp [{from_number}]: {text}")
-
     reply_text = await channel_handler.process(text)
     _push_log(f"🤖 WhatsApp reply: {reply_text}")
 
@@ -443,57 +446,47 @@ async def whatsapp_webhook(request: Request) -> PlainTextResponse:
 async def acs_incoming_call(request: Request) -> dict[str, Any]:
     """Receive IncomingCall cloud event from ACS and answer the call."""
     from src.channels import voice_acs as acs  # noqa: PLC0415
-    from config.settings import get_settings   # noqa: PLC0415
 
-    s    = get_settings()
+    s    = _get_settings()
     body = await request.json()
 
-    # ACS may send an array of cloud events or a validation request
+    # ACS sends an array of cloud events (or a single dict)
     events = body if isinstance(body, list) else [body]
 
     for event in events:
-        # Subscription validation handshake
+        # EventGrid subscription validation handshake
         if event.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
             code = event.get("data", {}).get("validationCode", "")
             return {"validationResponse": code}
 
         event_type, data = acs.parse_cloud_event(event)
+        if event_type != acs.EVENT_INCOMING_CALL:
+            continue
 
-        if event_type == acs.EVENT_INCOMING_CALL:
-            incoming_ctx = data.get("incomingCallContext", "")
-            caller       = data.get("from", {}).get("rawId", "unknown")
-            _push_log(f"📞 ACS: incoming call from {caller}")
+        incoming_ctx = data.get("incomingCallContext", "")
+        caller       = data.get("from", {}).get("rawId", "unknown")
+        _push_log(f"📞 ACS: incoming call from {caller}")
 
-            # Answer the call
-            callback_url = s.acs_callback_url.rstrip("/") + "/webhook/acs/events"
-            answer_body  = acs.build_answer_request(incoming_ctx, callback_url)
+        acs_endpoint = _parse_acs_endpoint(s.acs_connection_string)
+        if not acs_endpoint:
+            _push_log("❌ ACS: no endpoint in ACS_CONNECTION_STRING")
+            return {"ok": False}
 
-            # Extract ACS endpoint from connection string
-            acs_endpoint = ""
-            for part in s.acs_connection_string.split(";"):
-                if part.startswith("endpoint="):
-                    acs_endpoint = part[9:].rstrip("/")
-                    break
+        callback_url = s.acs_callback_url.rstrip("/") + "/webhook/acs/events"
+        answer_body  = acs.build_answer_request(incoming_ctx, callback_url)
 
-            if not acs_endpoint:
-                _push_log("❌ ACS: no endpoint in ACS_CONNECTION_STRING")
-                return {"ok": False}
-
-            headers = {"Content-Type": "application/json"}
-            # For simplicity: use connection string key auth
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"{acs_endpoint}/calling/callConnections:answer?api-version=2024-06-15-preview",
-                    json=answer_body,
-                    headers=headers,
-                )
-                if resp.status_code not in (200, 201, 202):
-                    _push_log(f"❌ ACS answer failed {resp.status_code}: {resp.text[:200]}")
-                else:
-                    call_data = resp.json()
-                    call_id = call_data.get("callConnectionId", "")
-                    _acs_calls[call_id] = {"language": "en-US", "caller": caller}
-                    _push_log(f"✅ ACS: call answered, connection id={call_id}")
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{acs_endpoint}/calling/callConnections:answer?api-version=2024-06-15-preview",
+                json=answer_body,
+                headers={"Content-Type": "application/json"},
+            )
+        if resp.status_code not in (200, 201, 202):
+            _push_log(f"❌ ACS answer failed {resp.status_code}: {resp.text[:200]}")
+        else:
+            call_id = resp.json().get("callConnectionId", "")
+            _acs_calls[call_id] = {"language": "en-US", "caller": caller}
+            _push_log(f"✅ ACS: call answered, connection id={call_id}")
 
     return {"ok": True}
 
@@ -503,47 +496,44 @@ async def acs_incoming_call(request: Request) -> dict[str, Any]:
 @app.post("/webhook/acs/events")
 async def acs_call_events(request: Request) -> dict[str, Any]:
     """Handle mid-call ACS events: play greeting, recognize speech, respond."""
-    from src.channels import voice_acs as acs  # noqa: PLC0415
-    from src.channels.handler import channel_handler  # noqa: PLC0415
-    from config.settings import get_settings   # noqa: PLC0415
+    from src.channels import voice_acs as acs             # noqa: PLC0415
+    from src.channels.handler import channel_handler      # noqa: PLC0415
 
-    s      = get_settings()
-    body   = await request.json()
+    s    = _get_settings()
+    body = await request.json()
     events = body if isinstance(body, list) else [body]
 
-    # Derive ACS REST base URL from connection string
-    acs_endpoint = ""
-    for part in s.acs_connection_string.split(";"):
-        if part.startswith("endpoint="):
-            acs_endpoint = part[9:].rstrip("/")
-            break
+    acs_endpoint = _parse_acs_endpoint(s.acs_connection_string)
+
+    async def _acs_post(path: str, payload: dict[str, Any]) -> None:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"{acs_endpoint}{path}",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
 
     async def _play(call_id: str, text: str, op_ctx: str = "reply") -> None:
         lang  = _acs_calls.get(call_id, {}).get("language", "en-US")
         voice = LANGUAGE_VOICES.get(lang, "en-US-AriaNeural")
-        payload = acs.build_play_tts_request(text, voice_name=voice, operation_context=op_ctx)
-        async with httpx.AsyncClient(timeout=15) as client:
-            await client.post(
-                f"{acs_endpoint}/calling/callConnections/{call_id}:play?api-version=2024-06-15-preview",
-                json=payload,
-            )
+        await _acs_post(
+            f"/calling/callConnections/{call_id}:play?api-version=2024-06-15-preview",
+            acs.build_play_tts_request(text, voice_name=voice, operation_context=op_ctx),
+        )
 
     async def _recognize(call_id: str, prompt: str) -> None:
         lang  = _acs_calls.get(call_id, {}).get("language", "en-US")
         voice = LANGUAGE_VOICES.get(lang, "en-US-AriaNeural")
-        payload = acs.build_recognize_request(prompt, voice_name=voice, speech_language=lang)
-        async with httpx.AsyncClient(timeout=15) as client:
-            await client.post(
-                f"{acs_endpoint}/calling/callConnections/{call_id}:startRecognizing?api-version=2024-06-15-preview",
-                json=payload,
-            )
+        await _acs_post(
+            f"/calling/callConnections/{call_id}:startRecognizing?api-version=2024-06-15-preview",
+            acs.build_recognize_request(prompt, voice_name=voice, speech_language=lang),
+        )
 
     async def _hangup(call_id: str) -> None:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
-                f"{acs_endpoint}/calling/callConnections/{call_id}:hangUp?api-version=2024-06-15-preview",
-                json=acs.build_hangup_request(),
-            )
+        await _acs_post(
+            f"/calling/callConnections/{call_id}:hangUp?api-version=2024-06-15-preview",
+            acs.build_hangup_request(),
+        )
 
     for event in events:
         event_type, data = acs.parse_cloud_event(event)
@@ -565,12 +555,11 @@ async def acs_call_events(request: Request) -> dict[str, Any]:
         elif event_type == acs.EVENT_RECOGNIZE_FAILED:
             _push_log(f"⚠️ ACS: recognize failed for {call_id}")
             if acs_endpoint:
-                await _play(call_id, "Sorry, I didn't catch that. Please say it again.", op_ctx="retry")
+                await _play(call_id, "Sorry, I didn't catch that. Could you repeat that?", op_ctx="retry")
 
         elif event_type == acs.EVENT_PLAY_COMPLETED:
             op_ctx = data.get("operationContext", "")
             if op_ctx == "agent_reply" and acs_endpoint:
-                # After replying, listen for more
                 await _recognize(call_id, "Is there anything else I can help you with?")
             elif op_ctx == "retry" and acs_endpoint:
                 await _recognize(call_id, "")

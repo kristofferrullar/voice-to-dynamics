@@ -1,7 +1,7 @@
 [project]
-name = "voice-to-dynamics"
+name = "voice-mcp"
 version = "0.1.0"
-description = "Voice assistant for Microsoft Dataverse / Dynamics 365 (Swedish)"
+description = "Generic voice agent for any MCP server — Azure Speech + Claude + Teams/WhatsApp/ACS"
 requires-python = ">=3.12"
 dependencies = [
     "azure-cognitiveservices-speech>=1.44.0",
@@ -26,6 +26,9 @@ dev = [
     "mypy>=1.11.0",
 ]
 
+[project.scripts]
+voice-mcp = "voice_mcp.__main__:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -39,4 +42,4 @@ strict = true
 ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "mcp_servers"]
+packages = ["src", "mcp_servers", "voice_mcp", "ui", "config"]

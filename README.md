@@ -22,47 +22,80 @@ Built with [Azure Cognitive Services](https://azure.microsoft.com/en-us/products
 
 ## Quick start
 
-### 1. Prerequisites
+### Option A — Local (Python)
 
-- Python 3.11+
-- Node.js 18+ (for GitHub MCP server)
-- [uv](https://docs.astral.sh/uv/) — `pip install uv`
-
-### 2. Install
+**Prerequisites:** Python 3.12+, Node.js 20+, [uv](https://docs.astral.sh/uv/)
 
 ```bash
-git clone https://github.com/<your-org>/voice-to-dynamics.git
+git clone https://github.com/kristofferrullar/voice-to-dynamics.git
 cd voice-to-dynamics
 uv sync
 ```
 
-### 3. Configure credentials
+Run the interactive setup wizard — it walks through every credential:
 
 ```bash
-cp .env.example .env
-# Edit .env and fill in your values — see notes below
+python -m voice_mcp setup
 ```
 
-Minimum required to run the text agent (no microphone):
+Verify all connections are working:
+
+```bash
+python -m voice_mcp check
+```
+
+```
+voice-mcp v0.1.0 — connection check
+──────────────────────────────────────────────────
+Credentials
+  ✅ ANTHROPIC_API_KEY
+  ✅ AZURE_SPEECH_KEY  (region: swedencentral)
+  ✅ GITHUB_PERSONAL_ACCESS_TOKEN
+  ⚪ AZURE_TENANT_ID — not set  (Dataverse)
+
+MCP Servers
+  ✅ github  (32 tools)
+      search_repositories, get_file_contents, create_issue … (+29)
+
+Channels
+  ⚪ Microsoft Teams — not configured
+  ⚪ WhatsApp (Twilio) — not configured
+  ⚪ ACS Voice — not configured
+
+  ✅ agent ready · 1 MCP server(s) · 0 channel(s) active
+```
+
+Start the management UI:
+
+```bash
+python -m voice_mcp ui       # http://localhost:8080
+python -m voice_mcp run      # voice session (microphone)
+```
+
+### Option B — Docker
+
+```bash
+git clone https://github.com/kristofferrullar/voice-to-dynamics.git
+cd voice-to-dynamics
+cp .env.example .env         # fill in your credentials
+docker compose up
+```
+
+Open [http://localhost:8080](http://localhost:8080).
+
+### Minimum credentials (text agent, no microphone)
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-For voice (STT/TTS):
+### Full voice
 
 ```env
+ANTHROPIC_API_KEY=sk-ant-...
 AZURE_SPEECH_KEY=...
 AZURE_SPEECH_REGION=swedencentral
 ```
-
-### 4. Start the UI
-
-```bash
-.venv/bin/uvicorn ui.app:app --port 8080
-```
-
-Open [http://localhost:8080](http://localhost:8080) — use the **Text Input** box to talk to the agent without a microphone, or press **Start** to begin a voice session.
 
 ---
 

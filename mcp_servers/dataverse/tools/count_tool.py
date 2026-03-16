@@ -1,7 +1,7 @@
 """count_records MCP tool — returns the number of records matching a filter."""
 from __future__ import annotations
 
-from mcp_servers.dataverse.client import DataverseClient
+from mcp_servers.dataverse.client import get_client
 from mcp_servers.dataverse.models import CountResult
 from mcp_servers.dataverse.tools._validation import validate_table, validate_filter
 
@@ -22,8 +22,7 @@ async def count_records(table_name: str, filter_expression: str = "") -> dict:
     if filter_expression:
         query_parts.append(f"$filter={filter_expression}")
 
-    client = DataverseClient()
-    data = await client.get(entity_set, "&".join(query_parts))
+    data = await get_client().get(entity_set, "&".join(query_parts))
     count = data.get("@odata.count", len(data.get("value", [])))
     return CountResult(count=int(count), entity_set=entity_set).model_dump()
 
