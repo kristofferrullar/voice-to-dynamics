@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "voice-mcp-ui",
+      "runtimeExecutable": "/Users/kristoffer/Developer/personal/Clade-dev/voice-to-dynamics/.venv/bin/python",
+      "runtimeArgs": ["-m", "voice_mcp", "ui"],
+      "port": 8080
+    }
+  ]
+}

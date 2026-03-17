@@ -46,7 +46,7 @@ from urllib.parse import parse_qs
 import httpx
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -125,12 +125,16 @@ def _get_settings():
 
 # ── app ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Voice to Dynamics UI")
-app.mount(
-    "/static",
-    StaticFiles(directory=str(Path(__file__).parent / "static")),
-    name="static",
-)
 
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH"],
+    allow_headers=["Content-Type"],
+)
 
 @app.on_event("startup")
 async def _startup() -> None:
@@ -140,14 +144,6 @@ async def _startup() -> None:
         from src.channels.telegram import get_poller  # noqa: PLC0415
         get_poller(s.telegram_bot_token).start()
         logger.info("Telegram poller started (token configured)")
-
-# ── UI ─────────────────────────────────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def serve_ui() -> HTMLResponse:
-    html = (Path(__file__).parent / "static" / "index.html").read_text()
-    return HTMLResponse(html)
-
 
 # ── Status ─────────────────────────────────────────────────────────────────────
 
@@ -686,3 +682,18 @@ async def acs_call_events(request: Request) -> dict[str, Any]:
             _acs_calls.pop(call_id, None)
 
     return {"ok": True}
+
+
+# ── Static assets (SvelteKit build) ────────────────────────────────────────────
+_static_dir = Path(__file__).parent / "static"
+if (_static_dir / "_app").exists():
+    app.mount("/_app", StaticFiles(directory=str(_static_dir / "_app")), name="app-assets")
+
+
+# ── SPA catch-all — serves index.html for all unmatched routes (client-side nav) ──
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str) -> Response:
+    index = _static_dir / "index.html"
+    if index.exists():
+        return Response(content=index.read_bytes(), media_type="text/html")
+    return Response(content="UI not built. Run: cd frontend && npm run build", status_code=404)
