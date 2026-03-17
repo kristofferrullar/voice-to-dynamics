@@ -23,7 +23,8 @@ export default defineConfig({
         }
       },
       '/config': { target: 'http://localhost:8080', changeOrigin: true },
-      '/webhook': { target: 'http://localhost:8080', changeOrigin: true }
+      '/webhook': { target: 'http://localhost:8080', changeOrigin: true },
+      '/api':     { target: 'http://localhost:8080', changeOrigin: true }
     }
   }
 });

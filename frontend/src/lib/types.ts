@@ -31,3 +31,41 @@ export interface ChannelsConfig {
   acs: ChannelStatus;
   telegram: ChannelStatus;
 }
+
+export interface AgentPattern {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  recommended_mcps: string[];
+}
+
+export interface AgentMemory {
+  enabled: boolean;
+  max_turns: number;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  pattern: string;
+  model: string;
+  mcp_servers: string[];
+  channels: string[];
+  memory: AgentMemory;
+  system_prompt_override: string | null;
+  status: 'stopped' | 'running' | 'paused';
+}
+
+export interface McpTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface McpServerTools {
+  name: string;
+  description: string;
+  tool_count: number;
+  tools: McpTool[];
+}

@@ -204,7 +204,7 @@ async def handle_update(token: str, update: dict[str, Any]) -> None:
     - Text message  → agent → reply as text
     - Voice message → Azure STT → agent → Azure TTS → reply as voice note
     """
-    from src.channels.handler import channel_handler  # noqa: PLC0415
+    from src.agent.router import agent_router  # noqa: PLC0415
 
     parsed = parse_update(update)
     if not parsed:
@@ -250,8 +250,8 @@ async def handle_update(token: str, update: dict[str, Any]) -> None:
 
             logger.info("Telegram STT [%s]: %s", chat_id, transcript)
 
-            # 3. Process through agent
-            reply_text = await channel_handler.process(transcript, session_id=str(chat_id))
+            # 3. Route through agent router
+            reply_text = await agent_router.route("telegram", transcript, session_id=str(chat_id))
             logger.info("Telegram reply [%s]: %s", chat_id, reply_text)
 
             # 4. Synthesize reply with Azure TTS → OGG
@@ -274,7 +274,7 @@ async def handle_update(token: str, update: dict[str, Any]) -> None:
     else:
         logger.info("Telegram [%s] %s: %s", chat_id, user, parsed["text"])
         try:
-            reply = await channel_handler.process(parsed["text"], session_id=str(chat_id))
+            reply = await agent_router.route("telegram", parsed["text"], session_id=str(chat_id))
             await send_message(token, chat_id, reply)
         except Exception as exc:
             logger.error("Telegram text handler error: %s", exc)

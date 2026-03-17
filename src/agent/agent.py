@@ -29,15 +29,16 @@ class MCPAgent:
         mcp: MCPRegistry,
         max_iterations: int = 10,
         memory: ConversationMemory | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         self._llm = llm
         self._mcp = mcp
         self._max_iterations = max_iterations
         self._memory = memory or ConversationMemory(enabled=False)
         self._session_memories: dict[str, ConversationMemory] = {}
-        # Built lazily on the first process() call using the live server list,
-        # so the prompt accurately reflects whichever MCPs actually connected.
-        self._system_prompt: str | None = None
+        # Can be pre-built by AgentRouter using store.build_system_prompt();
+        # otherwise built lazily on the first process() call.
+        self._system_prompt: str | None = system_prompt
 
     def _get_memory(self, session_id: str) -> ConversationMemory:
         """Return (or create) the ConversationMemory for the given session_id."""

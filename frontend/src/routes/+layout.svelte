@@ -20,6 +20,7 @@
       {/snippet}
 
       {#snippet nav()}
+        <NavItem href="/agents">🤖 Agents</NavItem>
         <NavItem href="/session">🎙 Session</NavItem>
         <NavItem href="/credentials">🔑 Credentials</NavItem>
         <NavItem href="/channels">📡 Channels</NavItem>

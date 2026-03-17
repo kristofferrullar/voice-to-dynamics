@@ -26,11 +26,19 @@ _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "mcp_servers.yam
 class MCPRegistry:
     """Manages connections to all enabled MCP servers."""
 
-    def __init__(self) -> None:
+    def __init__(self, allowed_servers: list[str] | None = None) -> None:
+        """Create a registry.
+
+        Args:
+            allowed_servers: If non-empty, only connect to servers whose name is in
+                this list (still subject to the ``enabled`` flag in config).
+                Pass ``None`` or ``[]`` to connect to *all* enabled servers.
+        """
         self._servers: dict[str, MCPClient] = {}
         self._tool_to_server: dict[str, str] = {}       # tool_name → server_name
         self._server_descriptions: dict[str, str] = {}  # server_name → description
         self._tools_cache: list[dict[str, Any]] | None = None  # merged, rebuilt on reconnect
+        self._allowed_servers: set[str] | None = set(allowed_servers) if allowed_servers else None
 
     async def connect_all(self) -> None:
         """Connect to every enabled server listed in mcp_servers.yaml."""
@@ -38,6 +46,8 @@ class MCPRegistry:
         config = self._load_config()
         for srv in config.get("servers", []):
             if not srv.get("enabled", False):
+                continue
+            if self._allowed_servers is not None and srv["name"] not in self._allowed_servers:
                 continue
             name: str = srv["name"]
             client = MCPClient(

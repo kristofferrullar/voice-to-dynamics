@@ -151,12 +151,22 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _startup() -> None:
-    """Auto-start Telegram long-polling when a token is configured."""
+    """On startup: restore running agents and start Telegram polling if configured."""
+    from src.agent.router import agent_router  # noqa: PLC0415
+    await agent_router.restore_running_agents()
+
     s = _get_settings()
     if s.telegram_bot_token:
         from src.channels.telegram import get_poller  # noqa: PLC0415
         get_poller(s.telegram_bot_token).start()
         logger.info("Telegram poller started (token configured)")
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    """On shutdown: stop all running agents cleanly."""
+    from src.agent.router import agent_router  # noqa: PLC0415
+    await agent_router.close_all()
 
 # ── Status ─────────────────────────────────────────────────────────────────────
 
@@ -469,7 +479,7 @@ async def update_credentials(req: CredentialUpdateRequest) -> dict[str, Any]:
 
 # ── Agent patterns ──────────────────────────────────────────────────────────────
 
-@app.get("/agents/patterns")
+@app.get("/api/agents/patterns")
 async def get_patterns() -> dict[str, Any]:
     """Return all available agent patterns."""
     from src.agent.patterns import patterns_as_dicts  # noqa: PLC0415
@@ -498,13 +508,13 @@ class AgentUpdateRequest(BaseModel):
     system_prompt_override: str | None = None
 
 
-@app.get("/agents")
+@app.get("/api/agents")
 async def list_agents() -> dict[str, Any]:
     from src.agent.store import list_agents as _list  # noqa: PLC0415
     return {"agents": _list()}
 
 
-@app.post("/agents", status_code=201)
+@app.post("/api/agents", status_code=201)
 async def create_agent(req: AgentCreateRequest) -> dict[str, Any]:
     from src.agent.store import create_agent as _create  # noqa: PLC0415
     agent = _create(req.model_dump())
@@ -512,7 +522,7 @@ async def create_agent(req: AgentCreateRequest) -> dict[str, Any]:
     return agent
 
 
-@app.get("/agents/{agent_id}")
+@app.get("/api/agents/{agent_id}")
 async def get_agent(agent_id: str) -> dict[str, Any]:
     from src.agent.store import get_agent as _get  # noqa: PLC0415
     agent = _get(agent_id)
@@ -521,7 +531,7 @@ async def get_agent(agent_id: str) -> dict[str, Any]:
     return agent
 
 
-@app.patch("/agents/{agent_id}")
+@app.patch("/api/agents/{agent_id}")
 async def update_agent(agent_id: str, req: AgentUpdateRequest) -> dict[str, Any]:
     from src.agent.store import update_agent as _update  # noqa: PLC0415
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
@@ -532,7 +542,7 @@ async def update_agent(agent_id: str, req: AgentUpdateRequest) -> dict[str, Any]
     return agent
 
 
-@app.delete("/agents/{agent_id}")
+@app.delete("/api/agents/{agent_id}")
 async def delete_agent(agent_id: str) -> dict[str, Any]:
     if agent_id == "default":
         raise HTTPException(400, "Cannot delete the default agent")
@@ -543,31 +553,36 @@ async def delete_agent(agent_id: str) -> dict[str, Any]:
     return {"ok": True, "id": agent_id}
 
 
-@app.post("/agents/{agent_id}/start")
+@app.post("/api/agents/{agent_id}/start")
 async def start_agent(agent_id: str) -> dict[str, Any]:
-    from src.agent.store import get_agent as _get, set_status  # noqa: PLC0415
+    from src.agent.store import get_agent as _get  # noqa: PLC0415
+    from src.agent.router import agent_router       # noqa: PLC0415
     agent = _get(agent_id)
     if not agent:
         raise HTTPException(404, f"Agent '{agent_id}' not found")
-    set_status(agent_id, "running")
+    try:
+        await agent_router.start_agent(agent_id)
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to start agent: {exc}") from exc
     _push_log(f"▶ Agent started: {agent['name']} ({agent_id})")
     return {"ok": True, "id": agent_id, "status": "running"}
 
 
-@app.post("/agents/{agent_id}/stop")
+@app.post("/api/agents/{agent_id}/stop")
 async def stop_agent(agent_id: str) -> dict[str, Any]:
-    from src.agent.store import get_agent as _get, set_status  # noqa: PLC0415
+    from src.agent.store import get_agent as _get  # noqa: PLC0415
+    from src.agent.router import agent_router       # noqa: PLC0415
     agent = _get(agent_id)
     if not agent:
         raise HTTPException(404, f"Agent '{agent_id}' not found")
-    set_status(agent_id, "stopped")
+    await agent_router.stop_agent(agent_id)
     _push_log(f"■ Agent stopped: {agent['name']} ({agent_id})")
     return {"ok": True, "id": agent_id, "status": "stopped"}
 
 
 # ── MCP — live tool introspection ───────────────────────────────────────────────
 
-@app.get("/mcp/tools")
+@app.get("/api/mcp/tools")
 async def get_mcp_tools() -> dict[str, Any]:
     """Connect to all enabled MCP servers and return their full tool list.
 
