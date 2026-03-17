@@ -1,0 +1,19 @@
+[
+  {
+    "id": "default",
+    "name": "Voice Assistant",
+    "pattern": "voice_assistant",
+    "model": "claude-sonnet-4-6",
+    "mcp_servers": [],
+    "channels": [
+      "telegram",
+      "local"
+    ],
+    "memory": {
+      "enabled": true,
+      "max_turns": 10
+    },
+    "system_prompt_override": null,
+    "status": "stopped"
+  }
+]

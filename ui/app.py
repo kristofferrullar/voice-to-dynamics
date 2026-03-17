@@ -29,6 +29,19 @@ Endpoints — Channel webhooks:
   POST /webhook/telegram       → Telegram Bot (webhook mode)
   POST /webhook/acs/call       → ACS incoming call (answer)
   POST /webhook/acs/events     → ACS mid-call events (recognize / play)
+
+Endpoints — Agents:
+  GET  /agents/patterns        → list available agent patterns
+  GET  /agents                 → list all agent definitions
+  POST /agents                 → create a new agent
+  GET  /agents/{id}            → get a single agent
+  PATCH /agents/{id}           → update agent config
+  DELETE /agents/{id}          → delete agent
+  POST /agents/{id}/start      → mark agent as running
+  POST /agents/{id}/stop       → mark agent as stopped
+
+Endpoints — MCP introspection:
+  GET  /mcp/tools              → live tool list from all enabled MCP servers
 """
 from __future__ import annotations
 
@@ -452,6 +465,151 @@ async def update_credentials(req: CredentialUpdateRequest) -> dict[str, Any]:
     updated_keys = list(req.updates.keys())
     _push_log(f"🔑 Credentials updated: {', '.join(updated_keys)}")
     return {"ok": True, "updated": updated_keys}
+
+
+# ── Agent patterns ──────────────────────────────────────────────────────────────
+
+@app.get("/agents/patterns")
+async def get_patterns() -> dict[str, Any]:
+    """Return all available agent patterns."""
+    from src.agent.patterns import patterns_as_dicts  # noqa: PLC0415
+    return {"patterns": patterns_as_dicts()}
+
+
+# ── Agent CRUD ──────────────────────────────────────────────────────────────────
+
+class AgentCreateRequest(BaseModel):
+    name: str
+    pattern: str = "voice_assistant"
+    model: str = "claude-sonnet-4-6"
+    mcp_servers: list[str] = []
+    channels: list[str] = []
+    memory: dict[str, Any] = {"enabled": True, "max_turns": 10}
+    system_prompt_override: str | None = None
+
+
+class AgentUpdateRequest(BaseModel):
+    name: str | None = None
+    pattern: str | None = None
+    model: str | None = None
+    mcp_servers: list[str] | None = None
+    channels: list[str] | None = None
+    memory: dict[str, Any] | None = None
+    system_prompt_override: str | None = None
+
+
+@app.get("/agents")
+async def list_agents() -> dict[str, Any]:
+    from src.agent.store import list_agents as _list  # noqa: PLC0415
+    return {"agents": _list()}
+
+
+@app.post("/agents", status_code=201)
+async def create_agent(req: AgentCreateRequest) -> dict[str, Any]:
+    from src.agent.store import create_agent as _create  # noqa: PLC0415
+    agent = _create(req.model_dump())
+    _push_log(f"🤖 Agent created: {agent['name']} ({agent['id']})")
+    return agent
+
+
+@app.get("/agents/{agent_id}")
+async def get_agent(agent_id: str) -> dict[str, Any]:
+    from src.agent.store import get_agent as _get  # noqa: PLC0415
+    agent = _get(agent_id)
+    if not agent:
+        raise HTTPException(404, f"Agent '{agent_id}' not found")
+    return agent
+
+
+@app.patch("/agents/{agent_id}")
+async def update_agent(agent_id: str, req: AgentUpdateRequest) -> dict[str, Any]:
+    from src.agent.store import update_agent as _update  # noqa: PLC0415
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    agent = _update(agent_id, updates)
+    if not agent:
+        raise HTTPException(404, f"Agent '{agent_id}' not found")
+    _push_log(f"✏️ Agent updated: {agent['name']} ({agent_id})")
+    return agent
+
+
+@app.delete("/agents/{agent_id}")
+async def delete_agent(agent_id: str) -> dict[str, Any]:
+    if agent_id == "default":
+        raise HTTPException(400, "Cannot delete the default agent")
+    from src.agent.store import delete_agent as _delete  # noqa: PLC0415
+    if not _delete(agent_id):
+        raise HTTPException(404, f"Agent '{agent_id}' not found")
+    _push_log(f"🗑️ Agent deleted: {agent_id}")
+    return {"ok": True, "id": agent_id}
+
+
+@app.post("/agents/{agent_id}/start")
+async def start_agent(agent_id: str) -> dict[str, Any]:
+    from src.agent.store import get_agent as _get, set_status  # noqa: PLC0415
+    agent = _get(agent_id)
+    if not agent:
+        raise HTTPException(404, f"Agent '{agent_id}' not found")
+    set_status(agent_id, "running")
+    _push_log(f"▶ Agent started: {agent['name']} ({agent_id})")
+    return {"ok": True, "id": agent_id, "status": "running"}
+
+
+@app.post("/agents/{agent_id}/stop")
+async def stop_agent(agent_id: str) -> dict[str, Any]:
+    from src.agent.store import get_agent as _get, set_status  # noqa: PLC0415
+    agent = _get(agent_id)
+    if not agent:
+        raise HTTPException(404, f"Agent '{agent_id}' not found")
+    set_status(agent_id, "stopped")
+    _push_log(f"■ Agent stopped: {agent['name']} ({agent_id})")
+    return {"ok": True, "id": agent_id, "status": "stopped"}
+
+
+# ── MCP — live tool introspection ───────────────────────────────────────────────
+
+@app.get("/mcp/tools")
+async def get_mcp_tools() -> dict[str, Any]:
+    """Connect to all enabled MCP servers and return their full tool list.
+
+    This is used by the agent setup wizard to show available tools when
+    selecting which MCP servers to attach to an agent.
+    Connects fresh each time so the list reflects the current server state.
+    """
+    from src.mcp.registry import MCPRegistry  # noqa: PLC0415
+
+    registry = MCPRegistry()
+    try:
+        await registry.connect_all()
+        raw_tools = await registry.get_tools()
+        summaries = registry.get_server_summaries()
+
+        # Group tools by server for the UI
+        server_tools: dict[str, list[dict[str, Any]]] = {s["name"]: [] for s in summaries}
+        for tool in raw_tools:
+            # tool name format: "server_name__tool_name" OR just "tool_name"
+            # match via server summaries
+            for srv in summaries:
+                if tool["name"] in srv["tools"]:
+                    server_tools[srv["name"]].append({
+                        "name":        tool["name"],
+                        "description": tool.get("description", ""),
+                        "parameters":  tool.get("inputSchema", {}),
+                    })
+                    break
+
+        return {
+            "servers": [
+                {
+                    "name":        srv["name"],
+                    "description": srv["description"],
+                    "tool_count":  len(srv["tools"]),
+                    "tools":       server_tools.get(srv["name"], []),
+                }
+                for srv in summaries
+            ]
+        }
+    finally:
+        await registry.disconnect_all()
 
 
 # ── Webhook — Microsoft Teams ────────────────────────────────────────────────────
