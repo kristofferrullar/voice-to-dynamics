@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { PageContainer, PageHeader, Button, Alert, Tabs, Input, Select } from 'wop-ui';
+  import { PageContainer, PageHeader, Button, Card, Alert, Input } from 'wop-ui';
   import { getPatterns, createAgent, getMcpTools } from '$lib/api/agents';
   import { getMcp } from '$lib/api/config';
   import type { AgentPattern, McpServerTools, McpServer } from '$lib/types';
@@ -36,6 +36,8 @@
   let maxTurns = $state(10);
   let promptOverride = $state('');
   let showPromptOverride = $state(false);
+  let openclawUrl = $state('ws://openclaw-gateway:18789');
+  let openclawAgentId = $state('voice-agent');
 
   let error = $state('');
   let saving = $state(false);
@@ -93,6 +95,8 @@
         channels: selectedChannels,
         memory: { enabled: memoryEnabled, max_turns: maxTurns },
         system_prompt_override: showPromptOverride && promptOverride ? promptOverride : null,
+        openclaw_url: openclawUrl,
+        openclaw_agent_id: openclawAgentId,
       });
       window.location.href = '/agents';
     } catch (e) {
@@ -171,18 +175,44 @@
   {#if step === 2}
     <div style="margin-bottom: var(--space-3);">
       <p style="font-size: var(--font-size-xs); color: var(--text-secondary);">
-        Select which MCP servers this agent can use. Leave all unchecked to use all enabled servers.
+        {selectedPattern === 'openclaw_agent'
+          ? 'OpenClaw agents manage their own tools and skills via SOUL.md.'
+          : 'Select which MCP servers this agent can use. Leave all unchecked to use all enabled servers.'}
       </p>
     </div>
 
-    {#if toolsLoading}
+    {#if selectedPattern === 'openclaw_agent'}
+      <Card>
+        <div style="display: flex; flex-direction: column; gap: var(--space-4);">
+          <p style="font-size: var(--font-size-sm); color: var(--text-secondary); margin: 0;">
+            Configure the OpenClaw gateway connection below.
+          </p>
+          <div class="form-field">
+            <label class="label" for="openclaw-url">Gateway URL</label>
+            <Input
+              id="openclaw-url"
+              bind:value={openclawUrl}
+              placeholder="ws://openclaw-gateway:18789"
+            />
+          </div>
+          <div class="form-field">
+            <label class="label" for="openclaw-agent-id">Agent ID</label>
+            <Input
+              id="openclaw-agent-id"
+              bind:value={openclawAgentId}
+              placeholder="voice-agent"
+            />
+          </div>
+        </div>
+      </Card>
+    {:else if toolsLoading}
       <div style="color: var(--text-dim); font-size: var(--font-size-sm); padding: var(--space-4);">Loading tools…</div>
     {:else}
       <div style="display: flex; flex-direction: column; gap: var(--space-3);">
         {#each mcpServers as srv}
           {@const srvTools = toolsForServer(srv.name)}
           {@const checked = selectedMcps.length === 0 || selectedMcps.includes(srv.name)}
-          <div class="card" style="padding: var(--space-4);">
+          <Card>
             <div style="display: flex; align-items: center; gap: var(--space-3);">
               <input
                 type="checkbox"
@@ -216,7 +246,7 @@
                 {/each}
               </div>
             {/if}
-          </div>
+          </Card>
         {/each}
       </div>
     {/if}

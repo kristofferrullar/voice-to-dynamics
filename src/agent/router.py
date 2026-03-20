@@ -66,6 +66,22 @@ class AgentRouter:
 
             logger.info("Starting agent '%s' (%s)…", agent_cfg["name"], agent_id)
 
+            if agent_cfg.get("pattern") == "openclaw_agent":
+                from src.agent.openclaw import OpenClawGateway  # noqa: PLC0415
+                import os  # noqa: PLC0415
+
+                ws_url = agent_cfg.get("openclaw_url", "ws://openclaw-gateway:18789")
+                token = agent_cfg.get("openclaw_token") or os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
+                gateway_agent_id = agent_cfg.get("openclaw_agent_id", "voice-agent")
+
+                gw = OpenClawGateway(ws_url=ws_url, token=token, agent_id=gateway_agent_id)
+                await gw.connect()
+
+                self._live[agent_id] = (gw, None)
+                set_status(agent_id, "running")
+                logger.info("OpenClaw agent '%s' connected ✓", agent_cfg["name"])
+                return
+
             # Per-agent MCP registry (filtered to agent's server list if set)
             allowed = agent_cfg.get("mcp_servers") or None  # [] → None (all)
             mcp = MCPRegistry(allowed_servers=allowed)
@@ -106,8 +122,11 @@ class AgentRouter:
                 set_status(agent_id, "stopped")
                 return
 
-            _, mcp = self._live.pop(agent_id)
-            await mcp.disconnect_all()
+            agent_obj, resource = self._live.pop(agent_id)
+            if hasattr(resource, "disconnect_all"):
+                await resource.disconnect_all()
+            elif hasattr(agent_obj, "close"):
+                await agent_obj.close()
             set_status(agent_id, "stopped")
             logger.info("Agent '%s' stopped", agent_id)
 
@@ -163,7 +182,10 @@ class AgentRouter:
             self._log_fn(agent_id, f"📨 [{channel}] {text[:200]}")
         try:
             response = await agent_obj.process(text, session_id=session_id)
-            reply = response.result_summary or "Done."
+            if isinstance(response, str):
+                reply = response or "Done."
+            else:
+                reply = response.result_summary or "Done."
             if self._log_fn and agent_id:
                 self._log_fn(agent_id, f"🤖 {reply[:200]}")
             return reply

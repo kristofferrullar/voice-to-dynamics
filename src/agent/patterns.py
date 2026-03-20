@@ -93,10 +93,23 @@ TASK_AGENT = AgentPattern(
     ),
 )
 
+OPENCLAW_AGENT = AgentPattern(
+    id="openclaw_agent",
+    name="OpenClaw Agent",
+    description=(
+        "Route messages to an OpenClaw gateway agent. "
+        "The agent's personality is defined by its SOUL.md - "
+        "no MCP server selection needed."
+    ),
+    icon="🦞",
+    base_prompt="",
+    recommended_mcps=[],
+)
+
 
 # ── Registry ───────────────────────────────────────────────────────────────────
 
-ALL_PATTERNS: list[AgentPattern] = [VOICE_ASSISTANT, TASK_AGENT]
+ALL_PATTERNS: list[AgentPattern] = [VOICE_ASSISTANT, TASK_AGENT, OPENCLAW_AGENT]
 PATTERNS_BY_ID: dict[str, AgentPattern] = {p.id: p for p in ALL_PATTERNS}
 
 

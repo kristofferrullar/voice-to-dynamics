@@ -98,6 +98,8 @@ def create_agent(data: dict[str, Any]) -> dict[str, Any]:
             "channels":              data.get("channels", []),
             "memory":                data.get("memory", {"enabled": True, "max_turns": 10}),
             "system_prompt_override": data.get("system_prompt_override"),
+            "openclaw_url":          data.get("openclaw_url", "ws://openclaw-gateway:18789"),
+            "openclaw_agent_id":     data.get("openclaw_agent_id", "voice-agent"),
             "status":                "stopped",
         }
         agents.append(agent)

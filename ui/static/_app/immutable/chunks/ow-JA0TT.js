@@ -1,0 +1,1 @@
+import"./Bzak7iHL.js";import{c as i,r as o,t as p}from"./Sb2I7HiW.js";import{a as m,f as d}from"./CO21hDTA.js";import{f,s as r}from"./iqQQGS90.js";var n=d('<span class="badge"><!></span>');function h(s,t){var a=n(),e=i(a);f(e,()=>t.children),o(a),p(()=>{r(a,"data-status",t.status),r(a,"data-priority",t.priority),r(a,"data-type",t.type)}),m(s,a)}export{h as B};

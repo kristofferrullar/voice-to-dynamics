@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import { PageContainer, PageHeader, Button, Badge, Alert, Tabs } from 'wop-ui';
+  import { PageContainer, PageHeader, Button, Badge, Card, Alert, Tabs, Input } from 'wop-ui';
   import { getAgent, updateAgent, startAgent, stopAgent, getMcpTools } from '$lib/api/agents';
   import { createLogStream } from '$lib/api/sse';
   import type { Agent, McpServerTools } from '$lib/types';
@@ -204,6 +204,25 @@
             <textarea class="textarea" id="prompt" bind:value={editPrompt} oninput={() => dirty = true} rows={6} placeholder="Leave empty to use the pattern's default prompt…"></textarea>
             <div class="helper-text">Overrides the "{agent.pattern.replace('_',' ')}" pattern prompt when set.</div>
           </div>
+
+          {#if agent.pattern === 'openclaw_agent'}
+            <Card>
+              <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+                <div>
+                  <p style="font-size: var(--font-size-xs); color: var(--text-secondary); margin: 0 0 var(--space-1) 0;">
+                    OpenClaw Gateway
+                  </p>
+                  <Input value={agent.openclaw_url ?? 'ws://openclaw-gateway:18789'} disabled={true} />
+                </div>
+                <div>
+                  <p style="font-size: var(--font-size-xs); color: var(--text-secondary); margin: 0 0 var(--space-1) 0;">
+                    Agent ID
+                  </p>
+                  <Input value={agent.openclaw_agent_id ?? 'voice-agent'} disabled={true} />
+                </div>
+              </div>
+            </Card>
+          {/if}
 
           {#if dirty}
             <div style="display: flex; gap: var(--space-2);">

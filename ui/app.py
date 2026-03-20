@@ -536,6 +536,8 @@ class AgentCreateRequest(BaseModel):
     channels: list[str] = []
     memory: dict[str, Any] = {"enabled": True, "max_turns": 10}
     system_prompt_override: str | None = None
+    openclaw_url: str = "ws://openclaw-gateway:18789"
+    openclaw_agent_id: str = "voice-agent"
 
 
 class AgentUpdateRequest(BaseModel):
@@ -546,6 +548,8 @@ class AgentUpdateRequest(BaseModel):
     channels: list[str] | None = None
     memory: dict[str, Any] | None = None
     system_prompt_override: str | None = None
+    openclaw_url: str | None = None
+    openclaw_agent_id: str | None = None
 
 
 @app.get("/api/agents")

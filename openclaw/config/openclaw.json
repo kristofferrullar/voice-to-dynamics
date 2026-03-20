@@ -1,0 +1,23 @@
+{
+  "gateway": {
+    "mode": "local",
+    "controlUi": {
+      "dangerouslyAllowHostHeaderOriginFallback": true,
+      "dangerouslyDisableDeviceAuth": true
+    }
+  },
+  "agents": {
+    "list": [
+      {
+        "id": "voice-agent",
+        "default": true,
+        "identity": {
+          "name": "Voice Agent",
+          "emoji": "🦞"
+        },
+        "workspace": "/home/node/.openclaw/workspace/voice-agent",
+        "model": "anthropic/claude-sonnet-4-6"
+      }
+    ]
+  }
+}

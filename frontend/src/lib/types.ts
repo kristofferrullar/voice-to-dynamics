@@ -54,6 +54,8 @@ export interface Agent {
   channels: string[];
   memory: AgentMemory;
   system_prompt_override: string | null;
+  openclaw_url?: string;
+  openclaw_agent_id?: string;
   status: 'stopped' | 'running' | 'paused';
 }
 
