@@ -1,1 +1,0 @@
-import"../chunks/Bzak7iHL.js";import{i as p}from"../chunks/BdhJIPkK.js";import{p as s,o as a,a as t}from"../chunks/Sb2I7HiW.js";import{g as i}from"../chunks/p7L2V5So.js";function c(n,o){s(o,!1),a(()=>i("/session")),p(),t()}export{c as component};

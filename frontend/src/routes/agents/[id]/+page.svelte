@@ -40,6 +40,8 @@
   let editPrompt = $state('');
   let editMemoryEnabled = $state(true);
   let editMaxTurns = $state(10);
+  let editOpenclawUrl = $state('');
+  let editOpenclawAgentId = $state('');
   let dirty = $state(false);
 
   const agentId = $derived($page.params.id);
@@ -53,6 +55,8 @@
       editPrompt = agent.system_prompt_override ?? '';
       editMemoryEnabled = agent.memory.enabled;
       editMaxTurns = agent.memory.max_turns;
+      editOpenclawUrl = agent.openclaw_url ?? 'ws://openclaw-gateway:18789';
+      editOpenclawAgentId = agent.openclaw_agent_id ?? 'voice-agent';
     } catch (e) {
       error = String(e);
     }
@@ -107,6 +111,8 @@
         channels: editChannels,
         system_prompt_override: editPrompt || null,
         memory: { enabled: editMemoryEnabled, max_turns: editMaxTurns },
+        openclaw_url: agent.pattern === 'openclaw_agent' ? editOpenclawUrl : undefined,
+        openclaw_agent_id: agent.pattern === 'openclaw_agent' ? editOpenclawAgentId : undefined,
       });
       agent = updated;
       dirty = false;
@@ -206,22 +212,14 @@
           </div>
 
           {#if agent.pattern === 'openclaw_agent'}
-            <Card>
-              <div style="display: flex; flex-direction: column; gap: var(--space-3);">
-                <div>
-                  <p style="font-size: var(--font-size-xs); color: var(--text-secondary); margin: 0 0 var(--space-1) 0;">
-                    OpenClaw Gateway
-                  </p>
-                  <Input value={agent.openclaw_url ?? 'ws://openclaw-gateway:18789'} disabled={true} />
-                </div>
-                <div>
-                  <p style="font-size: var(--font-size-xs); color: var(--text-secondary); margin: 0 0 var(--space-1) 0;">
-                    Agent ID
-                  </p>
-                  <Input value={agent.openclaw_agent_id ?? 'voice-agent'} disabled={true} />
-                </div>
-              </div>
-            </Card>
+            <div class="form-field">
+              <label class="label" for="openclaw-url">OpenClaw Gateway URL</label>
+              <Input id="openclaw-url" bind:value={editOpenclawUrl} oninput={() => dirty = true} placeholder="ws://openclaw-gateway:18789" />
+            </div>
+            <div class="form-field">
+              <label class="label" for="openclaw-agent-id">OpenClaw Agent ID</label>
+              <Input id="openclaw-agent-id" bind:value={editOpenclawAgentId} oninput={() => dirty = true} placeholder="voice-agent" />
+            </div>
           {/if}
 
           {#if dirty}
@@ -232,6 +230,10 @@
                 editModel = agent?.model ?? '';
                 editChannels = [...(agent?.channels ?? [])];
                 editPrompt = agent?.system_prompt_override ?? '';
+                editMemoryEnabled = agent?.memory.enabled ?? true;
+                editMaxTurns = agent?.memory.max_turns ?? 10;
+                editOpenclawUrl = agent?.openclaw_url ?? 'ws://openclaw-gateway:18789';
+                editOpenclawAgentId = agent?.openclaw_agent_id ?? 'voice-agent';
                 dirty = false;
               }}>Discard</Button>
             </div>
