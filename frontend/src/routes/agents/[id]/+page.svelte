@@ -59,7 +59,7 @@
     stopStream = createLogStream((line) => {
       logLines = [...logLines.slice(-299), line];
       setTimeout(() => { if (logContainer) logContainer.scrollTop = logContainer.scrollHeight; }, 0);
-    });
+    }, undefined, agentId);
   });
 
   onDestroy(() => stopStream?.());

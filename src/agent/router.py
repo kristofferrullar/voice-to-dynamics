@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,11 @@ class AgentRouter:
         # agent_id → (MCPAgent, MCPRegistry)
         self._live: dict[str, tuple[Any, Any]] = {}
         self._lock = asyncio.Lock()
+        self._log_fn: Callable[[str, str], None] | None = None
+
+    def set_log_fn(self, fn: Callable[[str, str], None]) -> None:
+        """Set a callback for per-agent log lines: fn(agent_id, line)."""
+        self._log_fn = fn
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -142,20 +148,29 @@ class AgentRouter:
         found (e.g. during early development before channels are configured).
         Returns the agent's text reply.
         """
-        pair = self._find_agent_for_channel(channel)
+        agent_id, pair = self._find_agent_for_channel(channel)
         if pair is None:
             # Fallback: any running agent
-            pair = next(iter(self._live.values()), None)
+            entry = next(iter(self._live.items()), None)
+            if entry:
+                agent_id, pair = entry
         if pair is None:
             logger.warning("No running agent for channel '%s' — message dropped", channel)
             return "No agent is currently running. Start one from the Agents page."
 
         agent_obj, _ = pair
+        if self._log_fn and agent_id:
+            self._log_fn(agent_id, f"📨 [{channel}] {text[:200]}")
         try:
             response = await agent_obj.process(text, session_id=session_id)
-            return response.result_summary or "Done."
+            reply = response.result_summary or "Done."
+            if self._log_fn and agent_id:
+                self._log_fn(agent_id, f"🤖 {reply[:200]}")
+            return reply
         except Exception as exc:
             logger.error("Agent error on channel '%s': %s", channel, exc)
+            if self._log_fn and agent_id:
+                self._log_fn(agent_id, f"❌ Error: {exc}")
             return f"Sorry, something went wrong: {exc}"
 
     def is_running(self, agent_id: str) -> bool:
@@ -164,15 +179,17 @@ class AgentRouter:
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    def _find_agent_for_channel(self, channel: str) -> tuple[Any, Any] | None:
-        """Return the (MCPAgent, MCPRegistry) for the first running agent that
-        lists *channel* in its channels config."""
+    def _find_agent_for_channel(
+        self, channel: str
+    ) -> tuple[str | None, tuple[Any, Any] | None]:
+        """Return (agent_id, (MCPAgent, MCPRegistry)) for the first running agent
+        that lists *channel* in its channels config."""
         from src.agent.store import get_agent  # noqa: PLC0415
         for agent_id, pair in self._live.items():
             cfg = get_agent(agent_id)
             if cfg and channel in cfg.get("channels", []):
-                return pair
-        return None
+                return agent_id, pair
+        return None, None
 
 
 # Module-level singleton — shared by all channel webhooks and the API layer.

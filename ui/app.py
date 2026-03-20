@@ -89,6 +89,10 @@ _log_lines: deque[str] = deque(maxlen=300)
 # set gives O(1) add/discard vs O(n) list.remove
 _log_queues: set[asyncio.Queue[str]] = set()
 
+# Per-agent log state (keyed by agent_id)
+_agent_log_lines: dict[str, deque] = {}
+_agent_log_queues: dict[str, set[asyncio.Queue[str]]] = {}
+
 # Active ACS call state: call_connection_id → {language, caller}
 _acs_calls: dict[str, dict[str, Any]] = {}
 
@@ -109,6 +113,15 @@ def _save_mcp(cfg: dict[str, Any]) -> None:
 def _push_log(line: str) -> None:
     _log_lines.append(line)
     for q in _log_queues:
+        q.put_nowait(line)
+
+def _push_agent_log(agent_id: str, line: str) -> None:
+    """Push to global log AND to the per-agent queue for the detail page."""
+    _push_log(f"[{agent_id}] {line}")
+    if agent_id not in _agent_log_lines:
+        _agent_log_lines[agent_id] = deque(maxlen=300)
+    _agent_log_lines[agent_id].append(line)
+    for q in _agent_log_queues.get(agent_id, set()):
         q.put_nowait(line)
 
 async def _drain_stream(stream: asyncio.StreamReader | None) -> None:
@@ -153,6 +166,7 @@ app.add_middleware(
 async def _startup() -> None:
     """On startup: restore running agents and start Telegram polling if configured."""
     from src.agent.router import agent_router  # noqa: PLC0415
+    agent_router.set_log_fn(_push_agent_log)
     await agent_router.restore_running_agents()
 
     s = _get_settings()
@@ -196,6 +210,22 @@ async def start_session() -> dict[str, Any]:
     global _proc, _status
     if _status == "running":
         return {"ok": True, "msg": "Already running"}
+
+    # Ensure at least one agent with "local" channel is running
+    from src.agent.router import agent_router   # noqa: PLC0415
+    from src.agent.store import list_agents     # noqa: PLC0415
+    local_agents = [a for a in list_agents() if "local" in a.get("channels", [])]
+    running_local = [a for a in local_agents if agent_router.is_running(a["id"])]
+    if not running_local and local_agents:
+        try:
+            await agent_router.start_agent(local_agents[0]["id"])
+            _push_agent_log(local_agents[0]["id"], f"▶ Agent started: {local_agents[0]['name']}")
+            _push_log(f"▶ Auto-started agent '{local_agents[0]['name']}' for local channel")
+        except Exception as exc:
+            _push_log(f"⚠️ Could not auto-start local agent: {exc}")
+    elif not local_agents:
+        _push_log("⚠️ No agent configured for the local channel — voice will use fallback")
+
     _push_log("▶ Starting voice session…")
     _proc = await asyncio.create_subprocess_exec(
         str(PYTHON), str(SCRIPT),
@@ -239,14 +269,21 @@ async def resume_session() -> dict[str, Any]:
 
 
 @app.get("/logs")
-async def log_stream() -> StreamingResponse:
-    """Server-Sent Events stream of all log lines."""
+async def log_stream(agent_id: str | None = None) -> StreamingResponse:
+    """Server-Sent Events stream. Pass ?agent_id=xxx for per-agent filtering."""
     q: asyncio.Queue[str] = asyncio.Queue()
-    _log_queues.add(q)
+
+    if agent_id:
+        if agent_id not in _agent_log_queues:
+            _agent_log_queues[agent_id] = set()
+        _agent_log_queues[agent_id].add(q)
+        history = list(_agent_log_lines.get(agent_id, deque()))[-80:]
+    else:
+        _log_queues.add(q)
+        history = list(_log_lines)[-80:]
 
     async def generate():
-        # Replay recent history to new subscribers
-        for line in list(_log_lines)[-80:]:
+        for line in history:
             yield f"data: {json.dumps(line)}\n\n"
         try:
             while True:
@@ -258,7 +295,10 @@ async def log_stream() -> StreamingResponse:
         except asyncio.CancelledError:
             pass
         finally:
-            _log_queues.discard(q)
+            if agent_id:
+                _agent_log_queues.get(agent_id, set()).discard(q)
+            else:
+                _log_queues.discard(q)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -288,11 +328,11 @@ class TextRequest(BaseModel):
 
 @app.post("/text")
 async def process_text(req: TextRequest) -> dict[str, Any]:
-    """Process a text utterance through the agent without the microphone."""
+    """Process a text utterance through the agent router (local channel)."""
     _push_log(f"💬 Text: {req.text}")
     try:
-        from src.channels.handler import channel_handler  # noqa: PLC0415
-        response = await channel_handler.process(req.text)
+        from src.agent.router import agent_router  # noqa: PLC0415
+        response = await agent_router.route("local", req.text, session_id="local_ui")
         _push_log(f"🤖 {response}")
         return {"ok": True, "response": response}
     except Exception as exc:
@@ -565,6 +605,7 @@ async def start_agent(agent_id: str) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(500, f"Failed to start agent: {exc}") from exc
     _push_log(f"▶ Agent started: {agent['name']} ({agent_id})")
+    _push_agent_log(agent_id, f"▶ Agent started: {agent['name']}")
     return {"ok": True, "id": agent_id, "status": "running"}
 
 
@@ -577,6 +618,7 @@ async def stop_agent(agent_id: str) -> dict[str, Any]:
         raise HTTPException(404, f"Agent '{agent_id}' not found")
     await agent_router.stop_agent(agent_id)
     _push_log(f"■ Agent stopped: {agent['name']} ({agent_id})")
+    _push_agent_log(agent_id, f"■ Agent stopped: {agent['name']}")
     return {"ok": True, "id": agent_id, "status": "stopped"}
 
 

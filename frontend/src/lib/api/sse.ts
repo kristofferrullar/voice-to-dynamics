@@ -1,8 +1,10 @@
 export function createLogStream(
   onLine: (line: string) => void,
-  onError?: (err: Event) => void
+  onError?: (err: Event) => void,
+  agentId?: string
 ): () => void {
-  const es = new EventSource('/logs');
+  const url = agentId ? `/logs?agent_id=${encodeURIComponent(agentId)}` : '/logs';
+  const es = new EventSource(url);
 
   es.onmessage = (event) => {
     try {

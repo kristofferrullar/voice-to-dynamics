@@ -1,0 +1,1 @@
+function a(e,s,t){const n=t?`/logs?agent_id=${encodeURIComponent(t)}`:"/logs",o=new EventSource(n);return o.onmessage=r=>{try{const c=JSON.parse(r.data);e(c)}catch{e(r.data)}},o.onerror=r=>{},()=>o.close()}export{a as c};
