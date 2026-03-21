@@ -15,5 +15,24 @@
     },
     "system_prompt_override": null,
     "status": "stopped"
+  },
+  {
+    "id": "c6b05ab9",
+    "name": "My Voice Agent",
+    "pattern": "openclaw_agent",
+    "model": "claude-sonnet-4-6",
+    "mcp_servers": [],
+    "channels": [
+      "telegram",
+      "local"
+    ],
+    "memory": {
+      "enabled": true,
+      "max_turns": 10
+    },
+    "system_prompt_override": null,
+    "openclaw_url": "ws://openclaw-gateway:18789",
+    "openclaw_agent_id": "voice-agent",
+    "status": "stopped"
   }
 ]
